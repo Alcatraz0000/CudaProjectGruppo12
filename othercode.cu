@@ -10,8 +10,6 @@
 #include <thrust/scan.h>
 #include <time.h>
 
-#include "CycleTimer.h"
-
 #define SIZE 8192
 #define THREADSIZE 64
 #define BLOCKSIZE ((SIZE - 1) / THREADSIZE + 1)
@@ -61,7 +59,7 @@ __global__ void histogramKernel(int *inArray, int *outArray, int *radixArray, in
     if (index < arrayLength) {
         radixArray[index] = radixArrayShared[thread];
     }
-
+    __syncthreads();
     if (thread == 0) {
         for (i = 0; i < RADIX; i++) {
             outArray[blockIndex + i] = outArrayShared[i];
@@ -153,10 +151,6 @@ void cudaScanThrust(int *inarray, int arr_length, int *resultarray) {
 }
 
 void radixSort(int *array, int size) {
-    double startTime;
-    double endTime;
-    double duration;
-
     int significantDigit = 1;
 
     int threadCount;
@@ -191,8 +185,6 @@ void radixSort(int *array, int size) {
     largestNum = *d_out;
     printf("\tLargestNumThrust : %d\n", largestNum);
 
-    startTime = CycleTimer::currentSeconds();
-
     while (largestNum / significantDigit > 0) {
         int bucket[RADIX] = {0};
         cudaMemcpy(bucketArray, bucket, sizeof(int) * RADIX, cudaMemcpyHostToDevice);
@@ -218,12 +210,7 @@ void radixSort(int *array, int size) {
         significantDigit *= RADIX;
     }
 
-    endTime = CycleTimer::currentSeconds();
-    duration = endTime - startTime;
-
     cudaMemcpy(array, semiSortArray, sizeof(int) * size, cudaMemcpyDeviceToHost);
-
-    printf("Duration : %.3f ms\n", 1000.f * duration);
 
     cudaFree(inputArray);
     cudaFree(indexArray);
@@ -239,17 +226,16 @@ int main() {
     printf("----------------------------------\n");
 
     int size = SIZE;
-    int *array;
+    int array[size];
     int i;
-    int list;
+    int max_digit = 9999;
 
     srand(time(NULL));
 
     for (i = 0; i < size; i++) {
-        list[i] = SIZE - i;
+        array[i] = (rand() % max_digit);
     }
 
-    array = &list[0];
     printf("\nUnsorted List: ");
     printArray(array, size);
 

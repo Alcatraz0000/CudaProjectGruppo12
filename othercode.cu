@@ -22,6 +22,46 @@ __global__ void copyKernel(int *inArray, int *semiSortArray, int arrayLength) {
         inArray[index] = semiSortArray[index];
     }
 }
+__global__ void reduceMax(int *g_idata, int *g_odata) {
+    __shared__ int sdata[SIZE / BLOCKSIZE];  // each thread loads one element from global to shared mem unsigned
+    int tid = threadIdx.x;
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    sdata[tid] = g_idata[i];
+    __syncthreads();  // do reduction in shared mem
+    for (unsigned int s = 1; s < blockDim.x; s *= 2) {
+        if (tid % (2 * s) == 0) {
+            if (sdata[tid + s] > sdata[tid]) {
+                sdata[tid] = sdata[tid + s];
+            }
+        }
+        __syncthreads();
+    }  // write result for this block to global mem
+    if (tid == 0) {
+        g_odata[blockIdx.x] = sdata[0];
+    }
+}
+
+__global__ void reduceMax_Service(int *g_idata, int *max) {
+    __shared__ int sdata[THREADSIZE];  // each thread loads one element from global to shared mem unsigned
+    int tid = threadIdx.x;
+    if (g_idata[tid] > g_idata[THREADSIZE + tid])
+        sdata[tid] = g_idata[tid];
+    else
+        sdata[tid] = g_idata[THREADSIZE + tid];
+    __syncthreads();  // do reduction in shared mem
+    for (unsigned int s = 1; s < blockDim.x; s *= 2) {
+        if (tid % (2 * s) == 0) {
+            if (sdata[tid + s] > sdata[tid]) {
+                sdata[tid] = sdata[tid + s];
+            }
+        }
+        __syncthreads();
+    }  // write result for this block to global mem
+    if (tid == 0) {
+        *max = sdata[0];
+        printf("my max is %d", *max);
+    }
+}
 
 __global__ void histogramKernel(int *inArray, int *outArray, int *radixArray, int arrayLength, int significantDigit, int minElement) {
     __shared__ int inArrayShared[THREADSIZE];
@@ -154,9 +194,13 @@ void radixSort(int *array, int size) {
     int *indexArray;
     int *semiSortArray;
     int *blockBucketArray;
+    int *g_odata;
 
     cudaMalloc((void **)&inputArray, sizeof(int) * size);
     cudaMalloc((void **)&indexArray, sizeof(int) * size);
+
+    cudaMalloc((void **)&g_odata, sizeof(int) * BLOCKSIZE);
+
     cudaMalloc((void **)&radixArray, sizeof(int) * size);
 
     cudaMalloc((void **)&outputArray, sizeof(int) * size);
@@ -168,12 +212,16 @@ void radixSort(int *array, int size) {
     cudaMemcpy(inputArray, array, sizeof(int) * size, cudaMemcpyHostToDevice);
 
     int largestNum, smallestNum, max_digit;
-    thrust::device_ptr<int> d_in = thrust::device_pointer_cast(inputArray);
-    thrust::device_ptr<int> d_out;
-    d_out = thrust::max_element(d_in, d_in + size);
-    largestNum = *d_out;
-    d_out = thrust::min_element(d_in, d_in + size);
-    smallestNum = *d_out;
+    cudaThreadSynchronize();
+    reduceMax<<<blockCount, threadCount>>>(inputArray, g_odata);
+    reduceMax_Service<<<1, THREADSIZE>>>(g_odata, &largestNum);
+
+    /* thrust::device_ptr<int> d_in = thrust::device_pointer_cast(inputArray);
+     thrust::device_ptr<int> d_out;
+     d_out = thrust::max_element(d_in, d_in + size);
+     largestNum = *d_out;
+     d_out = thrust::min_element(d_in, d_in + size);
+     smallestNum = *d_out;*/
     printf("\tLargestNumThrust : %d\n", largestNum);
     printf("\tsmallestNumThrust : %d\n", smallestNum);
     max_digit = largestNum - smallestNum;

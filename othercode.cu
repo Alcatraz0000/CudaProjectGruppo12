@@ -27,8 +27,8 @@ __global__ void reduceMaxMin(int *g_idata, int *g_maxdata, int *g_mindata) {
     smaxdata[tid] = g_idata[i];
     smindata[tid] = g_idata[i];
     __syncthreads();  // do reduction in shared mem
-    for (unsigned int s = 1; s < blockDim.x; s *= 2) {
-        if (tid % (2 * s) == 0) {
+    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (tid < s) {
             if (smaxdata[tid + s] > smaxdata[tid]) {
                 smaxdata[tid] = smaxdata[tid + s];
             }
@@ -38,6 +38,7 @@ __global__ void reduceMaxMin(int *g_idata, int *g_maxdata, int *g_mindata) {
         }
         __syncthreads();
     }  // write result for this block to global mem
+
     if (tid == 0) {
         g_maxdata[blockIdx.x] = smaxdata[0];
         g_mindata[blockIdx.x] = smindata[0];
@@ -57,8 +58,8 @@ __global__ void reduceMaxMin_Service(int *g_maxdata, int *g_mindata, int *max, i
     else
         smindata[tid] = g_mindata[THREADSIZE + tid];
     __syncthreads();  // do reduction in shared mem
-    for (unsigned int s = 1; s < blockDim.x; s *= 2) {
-        if (tid % (2 * s) == 0) {
+    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (tid < s) {
             if (smaxdata[tid + s] > smaxdata[tid]) {
                 smaxdata[tid] = smaxdata[tid + s];
             }
@@ -196,7 +197,7 @@ void make_csv(float gflops, float time, float N) {
         fp = fopen(FILE_TO_OPEN, "w");
         fprintf(fp, "N, gflops, time_sec\n");
     }
-    fprintf(fp, "%f, %f, %f\n", N, gflops, time);
+    fprintf(fp, "%f, %f, %.5f\n", N, gflops, time);
     fclose(fp);
 }
 

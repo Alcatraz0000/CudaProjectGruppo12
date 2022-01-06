@@ -3,17 +3,14 @@
 #include <driver_functions.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <thrust/device_free.h>
-#include <thrust/device_malloc.h>
-#include <thrust/device_ptr.h>
-#include <thrust/extrema.h>
-#include <thrust/scan.h>
 #include <time.h>
+#include <unistd.h>
 
 #define SIZE 8192
 #define THREADSIZE 64
 #define BLOCKSIZE ((SIZE - 1) / THREADSIZE + 1)
 #define RADIX 10
+#define FILE_TO_OPEN "OURLASTCODE_shared_measures.csv"
 
 __global__ void copyKernel(int *inArray, int *semiSortArray, int arrayLength) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -22,44 +19,58 @@ __global__ void copyKernel(int *inArray, int *semiSortArray, int arrayLength) {
         inArray[index] = semiSortArray[index];
     }
 }
-__global__ void reduceMax(int *g_idata, int *g_odata) {
-    __shared__ int sdata[SIZE / BLOCKSIZE];  // each thread loads one element from global to shared mem unsigned
+__global__ void reduceMaxMin(int *g_idata, int *g_maxdata, int *g_mindata) {
+    __shared__ int smaxdata[(SIZE / BLOCKSIZE)];  // each thread loads one element from global to shared mem unsigned
+    __shared__ int smindata[(SIZE / BLOCKSIZE)];  // each thread loads one element from global to shared mem unsigned
     int tid = threadIdx.x;
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    sdata[tid] = g_idata[i];
+    smaxdata[tid] = g_idata[i];
+    smindata[tid] = g_idata[i];
     __syncthreads();  // do reduction in shared mem
     for (unsigned int s = 1; s < blockDim.x; s *= 2) {
         if (tid % (2 * s) == 0) {
-            if (sdata[tid + s] > sdata[tid]) {
-                sdata[tid] = sdata[tid + s];
+            if (smaxdata[tid + s] > smaxdata[tid]) {
+                smaxdata[tid] = smaxdata[tid + s];
+            }
+            if (smindata[tid + s] < smindata[tid]) {
+                smindata[tid] = smindata[tid + s];
             }
         }
         __syncthreads();
     }  // write result for this block to global mem
     if (tid == 0) {
-        g_odata[blockIdx.x] = sdata[0];
+        g_maxdata[blockIdx.x] = smaxdata[0];
+        g_mindata[blockIdx.x] = smindata[0];
     }
 }
 
-__global__ void reduceMax_Service(int *g_idata, int *max) {
-    __shared__ int sdata[THREADSIZE];  // each thread loads one element from global to shared mem unsigned
+__global__ void reduceMaxMin_Service(int *g_maxdata, int *g_mindata, int *max, int *min) {
+    __shared__ int smaxdata[(THREADSIZE)];  // each thread loads one element from global to shared mem unsigned
+    __shared__ int smindata[(THREADSIZE)];
     int tid = threadIdx.x;
-    if (g_idata[tid] > g_idata[THREADSIZE + tid])
-        sdata[tid] = g_idata[tid];
+    if (g_maxdata[tid] > g_maxdata[THREADSIZE + tid])
+        smaxdata[tid] = g_maxdata[tid];
     else
-        sdata[tid] = g_idata[THREADSIZE + tid];
+        smaxdata[tid] = g_maxdata[THREADSIZE + tid];
+    if (g_mindata[tid] < g_mindata[THREADSIZE + tid])
+        smindata[tid] = g_mindata[tid];
+    else
+        smindata[tid] = g_mindata[THREADSIZE + tid];
     __syncthreads();  // do reduction in shared mem
     for (unsigned int s = 1; s < blockDim.x; s *= 2) {
         if (tid % (2 * s) == 0) {
-            if (sdata[tid + s] > sdata[tid]) {
-                sdata[tid] = sdata[tid + s];
+            if (smaxdata[tid + s] > smaxdata[tid]) {
+                smaxdata[tid] = smaxdata[tid + s];
+            }
+            if (smindata[tid + s] < smindata[tid]) {
+                smindata[tid] = smindata[tid + s];
             }
         }
         __syncthreads();
     }  // write result for this block to global mem
     if (tid == 0) {
-        *max = sdata[0];
-        printf("my max is %d", *max);
+        *max = smaxdata[0];
+        *min = smindata[0];
     }
 }
 
@@ -176,6 +187,18 @@ int findLargestNum(int *array, int size) {
     }
     return largestNum;
 }
+void make_csv(float gflops, float time, float N) {
+    FILE *fp;
+    if (access(FILE_TO_OPEN, F_OK) == 0) {
+        fp = fopen(FILE_TO_OPEN, "a");
+
+    } else {
+        fp = fopen(FILE_TO_OPEN, "w");
+        fprintf(fp, "N, gflops, time_sec\n");
+    }
+    fprintf(fp, "%f, %f, %f\n", N, gflops, time);
+    fclose(fp);
+}
 
 void radixSort(int *array, int size) {
     int significantDigit = 1;
@@ -183,9 +206,10 @@ void radixSort(int *array, int size) {
     int threadCount;
     int blockCount;
 
+    int min, max;
+
     threadCount = THREADSIZE;
     blockCount = BLOCKSIZE;
-    ;
 
     int *outputArray;
     int *inputArray;
@@ -194,12 +218,16 @@ void radixSort(int *array, int size) {
     int *indexArray;
     int *semiSortArray;
     int *blockBucketArray;
-    int *g_odata;
+    int *g_maxdata;
+    int *g_mindata;
+    int *largestNum;
+    int *smallestNum;
 
     cudaMalloc((void **)&inputArray, sizeof(int) * size);
     cudaMalloc((void **)&indexArray, sizeof(int) * size);
 
-    cudaMalloc((void **)&g_odata, sizeof(int) * BLOCKSIZE);
+    cudaMalloc((void **)&g_maxdata, sizeof(int) * BLOCKSIZE);
+    cudaMalloc((void **)&g_mindata, sizeof(int) * BLOCKSIZE);
 
     cudaMalloc((void **)&radixArray, sizeof(int) * size);
 
@@ -211,31 +239,29 @@ void radixSort(int *array, int size) {
 
     cudaMemcpy(inputArray, array, sizeof(int) * size, cudaMemcpyHostToDevice);
 
-    int largestNum, smallestNum, max_digit;
-    cudaThreadSynchronize();
-    reduceMax<<<blockCount, threadCount>>>(inputArray, g_odata);
-    reduceMax_Service<<<1, THREADSIZE>>>(g_odata, &largestNum);
+    int max_digit;
+    cudaMalloc((void **)&largestNum, sizeof(int));
+    cudaMalloc((void **)&smallestNum, sizeof(int));
 
-    /* thrust::device_ptr<int> d_in = thrust::device_pointer_cast(inputArray);
-     thrust::device_ptr<int> d_out;
-     d_out = thrust::max_element(d_in, d_in + size);
-     largestNum = *d_out;
-     d_out = thrust::min_element(d_in, d_in + size);
-     smallestNum = *d_out;*/
-    printf("\tLargestNumThrust : %d\n", largestNum);
-    printf("\tsmallestNumThrust : %d\n", smallestNum);
-    max_digit = largestNum - smallestNum;
     cudaError_t mycudaerror;
     mycudaerror = cudaGetLastError();
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     cudaEventRecord(start, 0);
 
+    reduceMaxMin<<<blockCount, threadCount>>>(inputArray, g_maxdata, g_mindata);
+    reduceMaxMin_Service<<<1, THREADSIZE>>>(g_maxdata, g_mindata, largestNum, smallestNum);
+
+    cudaMemcpy(&max, largestNum, sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&min, smallestNum, sizeof(int), cudaMemcpyDeviceToHost);
+
+    max_digit = max - min;
+
     while (max_digit / significantDigit > 0) {
         int bucket[RADIX] = {0};
         cudaMemcpy(bucketArray, bucket, sizeof(int) * RADIX, cudaMemcpyHostToDevice);
         // calcolo frequenza per ogni cifra, questo nel mio blocco.
-        histogramKernel<<<blockCount, threadCount>>>(inputArray, blockBucketArray, radixArray, size, significantDigit, smallestNum);
+        histogramKernel<<<blockCount, threadCount>>>(inputArray, blockBucketArray, radixArray, size, significantDigit, min);
         cudaThreadSynchronize();
         // calcolo la frequenza per ogni cifra, sommando quelle di tutti i block.
         // fondamentalmente sommo all'array delle frequenze il precedente, come facevamo nel vecchio algortimo. A[i-1] = A[i]
@@ -263,7 +289,7 @@ void radixSort(int *array, int size) {
     float transferTime;
     cudaEventElapsedTime(&transferTime, start, stop);
     printf("CUDA Time = %.5f ms dim=%d\n", transferTime, size);
-
+    make_csv(0, transferTime, size);
     cudaMemcpy(array, inputArray, sizeof(int) * size, cudaMemcpyDeviceToHost);
 
     cudaFree(inputArray);
@@ -293,16 +319,16 @@ int main() {
             array[i] = (rand() % max_digit);
     }
 
-    printf("\nUnsorted List: ");
-    printArray(array, size);
+    // printf("\nUnsorted List: ");
+    // printArray(array, size);
 
     radixSort(array, size);
     for (int i = 1; i < size; i++)
         if (array[i - 1] > array[i])
             printf("SE SCASSATT O PUNTATOR");
 
-    printf("\nSorted List:");
-    printArray(array, size);
+    // printf("\nSorted List:");
+    // printArray(array, size);
 
     printf("\n");
 

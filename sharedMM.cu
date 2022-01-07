@@ -49,14 +49,15 @@ __global__ void reduceMaxMin_Service(int *g_maxdata, int *g_mindata, int *max, i
     __shared__ int smaxdata[(THREADSIZE)];  // each thread loads one element from global to shared mem unsigned
     __shared__ int smindata[(THREADSIZE)];
     int tid = threadIdx.x;
-    if (g_maxdata[tid] > g_maxdata[THREADSIZE + tid])
-        smaxdata[tid] = g_maxdata[tid];
-    else
-        smaxdata[tid] = g_maxdata[THREADSIZE + tid];
-    if (g_mindata[tid] < g_mindata[THREADSIZE + tid])
-        smindata[tid] = g_mindata[tid];
-    else
-        smindata[tid] = g_mindata[THREADSIZE + tid];
+    smaxdata[tid] = g_maxdata[tid];
+    smindata[tid] = g_mindata[tid];
+    for (unsigned int s = 1; s < BLOCKSIZE / THREADSIZE; s++) {
+        int index = THREADSIZE * s + tid;
+        if (smaxdata[tid] < g_maxdata[index])
+            smaxdata[tid] = g_maxdata[index];
+        if (smindata[tid] > g_mindata[index])
+            smindata[tid] = g_mindata[index];
+    }
     __syncthreads();  // do reduction in shared mem
     for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
         if (tid < s) {

@@ -6,6 +6,16 @@
 #include <time.h>
 #include <unistd.h>
 
+#define CUDA_CHECK(X)                                                     \
+    {                                                                     \
+        cudaError_t _m_cudaStat = X;                                      \
+        if (cudaSuccess != _m_cudaStat) {                                 \
+            fprintf(stderr, "\nCUDA_ERROR: %s in file %s line %d\n",      \
+                    cudaGetErrorString(_m_cudaStat), __FILE__, __LINE__); \
+            exit(1);                                                      \
+        }                                                                 \
+    }
+
 #define SIZE 8192
 #define THREADSIZE 64
 #define BLOCKSIZE ((SIZE - 1) / THREADSIZE + 1)
@@ -224,20 +234,19 @@ void radixSort(int *array, int size) {
     int *g_mindata;
     int *largestNum;
     int *smallestNum;
+    CUDA_CHECK(cudaMalloc((void **)&inputArray, sizeof(int) * size));
+    CUDA_CHECK(cudaMalloc((void **)&indexArray, sizeof(int) * size));
 
-    cudaMalloc((void **)&inputArray, sizeof(int) * size);
-    cudaMalloc((void **)&indexArray, sizeof(int) * size);
+    CUDA_CHECK(cudaMalloc((void **)&g_maxdata, sizeof(int) * BLOCKSIZE));
+    CUDA_CHECK(cudaMalloc((void **)&g_mindata, sizeof(int) * BLOCKSIZE));
 
-    cudaMalloc((void **)&g_maxdata, sizeof(int) * BLOCKSIZE);
-    cudaMalloc((void **)&g_mindata, sizeof(int) * BLOCKSIZE);
+    CUDA_CHECK(cudaMalloc((void **)&radixArray, sizeof(int) * size));
 
-    cudaMalloc((void **)&radixArray, sizeof(int) * size);
+    CUDA_CHECK(cudaMalloc((void **)&outputArray, sizeof(int) * size));
 
-    cudaMalloc((void **)&outputArray, sizeof(int) * size);
-
-    cudaMalloc((void **)&semiSortArray, sizeof(int) * size);
-    cudaMalloc((void **)&bucketArray, sizeof(int) * RADIX);
-    cudaMalloc((void **)&blockBucketArray, sizeof(int) * RADIX * BLOCKSIZE);
+    CUDA_CHECK(cudaMalloc((void **)&semiSortArray, sizeof(int) * size));
+    CUDA_CHECK(cudaMalloc((void **)&bucketArray, sizeof(int) * RADIX));
+    CUDA_CHECK(cudaMalloc((void **)&blockBucketArray, sizeof(int) * RADIX * BLOCKSIZE));
 
     cudaMemcpy(inputArray, array, sizeof(int) * size, cudaMemcpyHostToDevice);
 
@@ -252,32 +261,66 @@ void radixSort(int *array, int size) {
     cudaEventRecord(start, 0);
 
     reduceMaxMin<<<blockCount, threadCount>>>(inputArray, g_maxdata, g_mindata);
+    mycudaerror = cudaGetLastError();
+    if (mycudaerror != cudaSuccess) {
+        fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
+        exit(1);
+    }
     reduceMaxMin_Service<<<1, THREADSIZE>>>(g_maxdata, g_mindata, largestNum, smallestNum);
+    mycudaerror = cudaGetLastError();
+    if (mycudaerror != cudaSuccess) {
+        fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
+        exit(1);
+    }
 
     cudaMemcpy(&max, largestNum, sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(&min, smallestNum, sizeof(int), cudaMemcpyDeviceToHost);
 
     max_digit = max - min;
-
     while (max_digit / significantDigit > 0) {
         int bucket[RADIX] = {0};
         cudaMemcpy(bucketArray, bucket, sizeof(int) * RADIX, cudaMemcpyHostToDevice);
         // calcolo frequenza per ogni cifra, questo nel mio blocco.
         histogramKernel<<<blockCount, threadCount>>>(inputArray, blockBucketArray, radixArray, size, significantDigit, min);
         cudaThreadSynchronize();
+        mycudaerror = cudaGetLastError();
+        if (mycudaerror != cudaSuccess) {
+            fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
+            exit(1);
+        }
         // calcolo la frequenza per ogni cifra, sommando quelle di tutti i block.
         // fondamentalmente sommo all'array delle frequenze il precedente, come facevamo nel vecchio algortimo. A[i-1] = A[i]
         combineBucket<<<1, RADIX>>>(blockBucketArray, bucketArray);
         cudaThreadSynchronize();
+        mycudaerror = cudaGetLastError();
+        if (mycudaerror != cudaSuccess) {
+            fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
+            exit(1);
+        }
         // salva gli indici in cui memorizzare gli elementi ordinati --> fa la magia :D
         indexArrayKernel<<<blockCount, threadCount>>>(radixArray, bucketArray, indexArray, size, significantDigit);
         cudaThreadSynchronize();
+        mycudaerror = cudaGetLastError();
+        if (mycudaerror != cudaSuccess) {
+            fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
+            exit(1);
+        }
         // salva gli elementi nella corretta posizione ordinati.
         semiSortKernel<<<blockCount, threadCount>>>(inputArray, semiSortArray, indexArray, size, significantDigit);
         cudaThreadSynchronize();
+        mycudaerror = cudaGetLastError();
+        if (mycudaerror != cudaSuccess) {
+            fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
+            exit(1);
+        }
         // aggiorno inputArray con il semisortedarray
         copyKernel<<<blockCount, threadCount>>>(inputArray, semiSortArray, size);
         cudaThreadSynchronize();
+        mycudaerror = cudaGetLastError();
+        if (mycudaerror != cudaSuccess) {
+            fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
+            exit(1);
+        }
 
         significantDigit *= RADIX;
     }
@@ -308,10 +351,9 @@ int main() {
     printf("----------------------------------\n");
 
     int size = SIZE;
-    int array[size];
+    int *array = (int *)malloc(size * sizeof(int));
     int i;
     int max_digit = 9999;
-
     srand(time(NULL));
 
     for (i = 0; i < size; i++) {

@@ -20,7 +20,7 @@
 #define THREADSIZE 1024
 #define BLOCKSIZE ((SIZE - 1) / THREADSIZE + 1)
 #define RADIX 10
-#define MAXSM 13
+#define MAXSM 12
 #define FILE_TO_OPEN "OURLASTCODE_shared_measures.csv"
 
 __global__ void copyKernel(int *inArray, int *semiSortArray, int arrayLength) {
@@ -114,7 +114,7 @@ __global__ void histogramKernel(int *inArray, int *outArray, int *radixArray, in
     __syncthreads();
 
     if (index < arrayLength) {
-        arrayElement = inArrayShared[thread] - minElement;
+        arrayElement = inArrayShared[thread];
         radix = ((arrayElement / significantDigit) % 10);
         radixArrayShared[thread] = radix;
         atomicAdd(&outArrayShared[radix], 1);
@@ -132,7 +132,7 @@ __global__ void histogramKernel(int *inArray, int *outArray, int *radixArray, in
     }
 }
 
-__global__ void combineBucket(int *blockBucketArray, int *bucketArray) {
+__global__ void combineBucket(int *blockBucketArray, int *bucketArray, int block_size) {
     __shared__ int bucketArrayShared[RADIX];
 
     int index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -141,7 +141,7 @@ __global__ void combineBucket(int *blockBucketArray, int *bucketArray) {
 
     bucketArrayShared[index] = 0;
 
-    for (i = index; i < RADIX * BLOCKSIZE; i = i + RADIX) {
+    for (i = index; i < RADIX * block_size; i = i + RADIX) {
         atomicAdd(&bucketArrayShared[index], blockBucketArray[i]);
     }
     __syncthreads();
@@ -150,6 +150,7 @@ __global__ void combineBucket(int *blockBucketArray, int *bucketArray) {
             bucketArrayShared[i] = bucketArrayShared[i - 1];
         }
     }
+
     __syncthreads();
     bucketArray[index] = bucketArrayShared[index];
 }
@@ -225,7 +226,7 @@ void radixSort(int *array, int size) {
 
     cudaStream_t stream[MAXSM];
 
-    for (int i = 0; i < MAXSM; i++)
+    for (int i = 0; i <= MAXSM; i++)
         cudaStreamCreate(&stream[i]);
     threadCount = THREADSIZE;
     blockCount = BLOCKSIZE;
@@ -283,12 +284,12 @@ void radixSort(int *array, int size) {
     int new_size_first = size / MAXSM + size % MAXSM;
     int new_size_second = size / MAXSM;
     int my_size, offset = 0;
-    int new_block_size = (new_size_first - 1) / THREADSIZE + 1;
+    int new_block_size;
     int tempo[10];
     for (int i = 0; i < 10; i++) {
         tempo[i] = 0;
     }
-    for (int i = 0; i < size; i++) {
+    for (int i = 0; i < new_size_first; i++) {
         tempo[array[i] % 10]++;
     }
     int alf = 0;
@@ -296,23 +297,36 @@ void radixSort(int *array, int size) {
         tempo[i] += tempo[i - 1];
     }
     for (int i = 0; i < 10; i++) {
-        alf += tempo[i];
+        printf(" %d ", tempo[i]);
     }
-
-    printf("dovrebbero eessere %d", alf);
+    int *myarraynew = (int *)malloc(size * sizeof(int));
 
     for (int i = 0; i < max_digit; i++) {
         int bucket[RADIX] = {0};
         printf("sono il for %d \n", i);
-        for (int j = 1; j < MAXSM; j++) {
+        for (int j = 1; j < 2; j++) {
             if (j == 1) {
-                cudaMemcpyAsync(inputArray, array, new_size_first, cudaMemcpyHostToDevice, stream[j]);
+                cudaMemcpyAsync(inputArray, array, 8192, cudaMemcpyHostToDevice, stream[j]);
                 my_size = new_size_first;
+                printf("entro qua\n");
+                cudaThreadSynchronize();
             } else {
                 cudaMemcpyAsync(inputArray + new_size_second * (j - 1) + size % MAXSM, array + new_size_second * (j - 1) + size % MAXSM, new_size_first, cudaMemcpyHostToDevice, stream[j]);
                 my_size = new_size_first;
                 offset = new_size_second * (j - 1) + size % MAXSM;
             }
+
+            cudaMemcpy(myarraynew, inputArray, 8192, cudaMemcpyDeviceToHost);
+
+            printf("ora verifco se so fort %d size", new_size_first);
+            for (int l = 0; l < 2048; l++) {
+                if (array[l + 2048 * k] != myarraynew[l]) {
+                    printf("questo %d e diverso da %d \n", array[l + 2048 * k], myarraynew[l]);
+                }
+            }
+
+            new_block_size = (my_size - 1) / THREADSIZE + 1;
+            printf(" il mio valore di %d \n", new_block_size);
             cudaMemcpyAsync(bucketArray, bucket, sizeof(int) * RADIX, cudaMemcpyHostToDevice, stream[j]);
             histogramKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, blockBucketArray, radixArray + offset, my_size, significantDigit, min);
             cudaThreadSynchronize();
@@ -323,19 +337,20 @@ void radixSort(int *array, int size) {
             }
             // calcolo la frequenza per ogni cifra, sommando quelle di tutti i block.
             // fondamentalmente sommo all'array delle frequenze il precedente, come facevamo nel vecchio algortimo. A[i-1] = A[i]
-            combineBucket<<<1, RADIX, 0, stream[j]>>>(blockBucketArray, bucketArray);
+            combineBucket<<<1, RADIX, 0, stream[j]>>>(blockBucketArray, bucketArray, new_block_size);
             cudaThreadSynchronize();
             mycudaerror = cudaGetLastError();
             if (mycudaerror != cudaSuccess) {
                 fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
                 exit(1);
             }
+            cudaMemcpy(bucket, blockBucketArray, sizeof(int) * RADIX * new_block_size, cudaMemcpyDeviceToHost);
+            int tmp = 0;
+            for (int k = 0; k < RADIX * new_block_size; k++)
+                tmp += bucket[k];
+            printf("\n %d ", tmp);
         }
-        cudaMemcpy(bucket, bucketArray, sizeof(int) * RADIX, cudaMemcpyDeviceToHost);
-        int tmp = 0;
-        for (int k = 0; k < RADIX; k++)
-            tmp += bucket[k];
-        printf("%d", tmp);
+
         // reduce bucketArray
 
         // salva gli indici in cui memorizzare gli elementi ordinati --> fa la magia :D
@@ -426,7 +441,8 @@ int main() {
     printf("----------------------------------\n");
 
     int size = SIZE;
-    int *array = (int *)malloc(size * sizeof(int));
+    int *array;
+    cudaMallocHost((void **)&array, size * sizeof(int));
     int i;
     int max_digit = 9999;
     srand(time(NULL));

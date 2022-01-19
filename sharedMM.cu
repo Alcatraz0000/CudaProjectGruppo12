@@ -48,8 +48,9 @@ __global__ void reduceMaxMin(int *g_idata, int *g_maxdata, int *g_mindata) {
             }
         }
         __syncthreads();
-    }  // write result for this block to global mem
+    }
 
+    // write result for this block to global mem
     if (tid == 0) {
         g_maxdata[blockIdx.x] = smaxdata[0];
         g_mindata[blockIdx.x] = smindata[0];
@@ -80,7 +81,8 @@ __global__ void reduceMaxMin_Service(int *g_maxdata, int *g_mindata, int *max, i
             }
         }
         __syncthreads();
-    }  // write result for this block to global mem
+    }
+    // write result for this block to global mem
     if (tid == 0) {
         *max = smaxdata[0];
         *min = smindata[0];
@@ -129,7 +131,7 @@ __global__ void histogramKernel(int *inArray, int *outArray, int *radixArray, in
         radixArray[index] = radixArrayShared[thread];
     }
     __syncthreads();
-    // forse possimao fare il casino che diventa supermegaultravelocissimo !!!!!!
+
     if (thread == 0) {
         for (i = 0; i < RADIX; i++) {
             outArray[blockIndex + i] += outArrayShared[i];
@@ -158,37 +160,6 @@ __global__ void combineBucket(int *blockBucketArray, int *bucketArray, int block
 
     __syncthreads();
     bucketArray[index] = bucketArrayShared[index];
-}
-
-__global__ void indexArrayKernel(int *radixArray, int *bucketArray, int *indexArray, int arrayLength, int significantDigit) {
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    __shared__ int prova;
-    if (threadIdx.x == 0) {
-        prova = bucketArray[blockIdx.x];
-    }
-    int i;
-    int radix;
-    int pocket;
-
-    for (i = threadIdx.x; i < arrayLength; i += blockDim.x) {
-        radix = radixArray[arrayLength - i - 1];
-        if (radix == blockIdx.x) {
-            pocket = prova--;
-            printf("sdasdadsd%d", pocket);
-            indexArray[arrayLength - i - 1] = pocket + 1;
-        }
-    }
-
-    /*if (index < RADIX) {
-        for (i = 0; i < arrayLength; i++) {
-            radix = radixArray[arrayLength - i - 1];
-            if (radix == index) {
-
-                pocket = --prova[radix];
-                indexArray[arrayLength - i - 1] = pocket;
-            }
-        }
-    }*/
 }
 
 __global__ void semiSortKernel(int *inArray, int *outArray, int *indexArray, int arrayLength, int significantDigit) {
@@ -286,15 +257,11 @@ void radixSort(int *array, int size) {
     cudaMalloc((void **)&smallestNum, sizeof(int));
 
     for (int j = 1; j <= MAXSM; j++) {
-        if (j == 1) {
+        if (j == 1)
             cudaMemcpyAsync(inputArray, array, new_size_first * sizeof(int), cudaMemcpyHostToDevice, stream[j]);
-            /*  my_size = new_size_first;
-              offset = 0;*/
-        } else {
+
+        else
             cudaMemcpyAsync(inputArray + new_size_second * (j - 1) + size % MAXSM, array + new_size_second * (j - 1) + size % MAXSM, new_size_second * sizeof(int), cudaMemcpyHostToDevice, stream[j]);
-            /*  my_size = new_size_second;
-              offset = new_size_second * (j - 1) + size % MAXSM;*/
-        }
     }
 
     cudaError_t mycudaerror;
@@ -335,9 +302,6 @@ void radixSort(int *array, int size) {
     }
 
     while (max_digit / significantDigit > 0) {
-        for (int k = 0; k < RADIX; k++)
-            bucket[k] = 0;
-        printf(" ordino le %d\n", significantDigit);
         resetBucket<<<BLOCKSIZE, RADIX>>>(blockBucketArray);
         for (int j = 1; j <= MAXSM; j++) {
             if (j == 1) {

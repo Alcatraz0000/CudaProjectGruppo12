@@ -21,7 +21,7 @@
 #define BLOCKSIZE ((SIZE - 1) / THREADSIZE + 1)
 #define RADIX 10
 #define MAXSM 12
-#define FILE_TO_OPEN "OURLASTCODE_shared_measures.csv"
+#define FILE_TO_OPEN "SHRD2_shared_measures.csv"
 
 texture<int, 1> texture_semiSortArray;  // donotremove
 __device__ float fetch_radixArrayElement(int value) {
@@ -35,6 +35,7 @@ __global__ void copyKernel(int *inArray, int offsette, int arrayLength) {
         inArray[index] = fetch_radixArrayElement(index + offsette);
     }
 }
+
 __global__ void reduceMaxMin(int *g_idata, int *g_maxdata, int *g_mindata) {
     __shared__ int smaxdata[(SIZE / BLOCKSIZE)];  // each thread loads one element from global to shared mem unsigned
     __shared__ int smindata[(SIZE / BLOCKSIZE)];  // each thread loads one element from global to shared mem unsigned
@@ -165,37 +166,6 @@ __global__ void combineBucket(int *blockBucketArray, int *bucketArray, int block
     bucketArray[index] = bucketArrayShared[index];
 }
 
-__global__ void indexArrayKernel(int *radixArray, int *bucketArray, int *indexArray, int arrayLength, int significantDigit) {
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    __shared__ int prova;
-    if (threadIdx.x == 0) {
-        prova = bucketArray[blockIdx.x];
-    }
-    int i;
-    int radix;
-    int pocket;
-
-    for (i = threadIdx.x; i < arrayLength; i += blockDim.x) {
-        radix = radixArray[arrayLength - i - 1];
-        if (radix == blockIdx.x) {
-            pocket = prova--;
-            printf("sdasdadsd%d", pocket);
-            indexArray[arrayLength - i - 1] = pocket + 1;
-        }
-    }
-
-    /*if (index < RADIX) {
-        for (i = 0; i < arrayLength; i++) {
-            radix = radixArray[arrayLength - i - 1];
-            if (radix == index) {
-
-                pocket = --prova[radix];
-                indexArray[arrayLength - i - 1] = pocket;
-            }
-        }
-    }*/
-}
-
 __global__ void semiSortKernel(int *inArray, int *outArray, int *indexArray, int arrayLength, int significantDigit) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -293,12 +263,9 @@ void radixSort(int *array, int size) {
     for (int j = 1; j <= MAXSM; j++) {
         if (j == 1) {
             cudaMemcpyAsync(inputArray, array, new_size_first * sizeof(int), cudaMemcpyHostToDevice, stream[j]);
-            /*  my_size = new_size_first;
-              offset = 0;*/
+
         } else {
             cudaMemcpyAsync(inputArray + new_size_second * (j - 1) + size % MAXSM, array + new_size_second * (j - 1) + size % MAXSM, new_size_second * sizeof(int), cudaMemcpyHostToDevice, stream[j]);
-            /*  my_size = new_size_second;
-              offset = new_size_second * (j - 1) + size % MAXSM;*/
         }
     }
 
@@ -344,8 +311,6 @@ void radixSort(int *array, int size) {
     }
 
     while (max_digit / significantDigit > 0) {
-        for (int k = 0; k < RADIX; k++)
-            bucket[k] = 0;
         resetBucket<<<BLOCKSIZE, RADIX>>>(blockBucketArray);
         for (int j = 1; j <= MAXSM; j++) {
             if (j == 1) {

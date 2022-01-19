@@ -16,7 +16,7 @@
         }                                                                 \
     }
 
-#define SIZE 8192
+#define SIZE 8192 * 12 * 12
 #define THREADSIZE 1024
 #define BLOCKSIZE ((SIZE - 1) / THREADSIZE + 1)
 #define RADIX 10
@@ -30,20 +30,13 @@ __global__ void copyKernel(int *inArray, int *semiSortArray, int arrayLength) {
         inArray[index] = semiSortArray[index];
     }
 }
-__global__ void reduceMaxMin(int *g_idata, int *g_maxdata, int *g_mindata, int *pos, int *neg) {
+__global__ void reduceMaxMin(int *g_idata, int *g_maxdata, int *g_mindata) {
     __shared__ int smaxdata[(SIZE / BLOCKSIZE)];  // each thread loads one element from global to shared mem unsigned
     __shared__ int smindata[(SIZE / BLOCKSIZE)];  // each thread loads one element from global to shared mem unsigned
     int tid = threadIdx.x;
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
     smaxdata[tid] = g_idata[i];
     smindata[tid] = g_idata[i];
-    if (g_idata[i] < 0) {
-        neg[i] = g_idata[i];
-        pos[i] = -1;
-    } else {
-        pos[i] = g_idata[i];
-        neg[i] = 1;
-    }
     __syncthreads();  // do reduction in shared mem
     for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
         if (tid < s) {
@@ -214,7 +207,6 @@ int findLargestNum(int *array, int size) {
     }
     return largestNum;
 }
-
 void make_csv(float gflops, float time, float N) {
     FILE *fp;
     if (access(FILE_TO_OPEN, F_OK) == 0) {
@@ -284,31 +276,18 @@ void radixSort(int *array, int size) {
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     cudaEventRecord(start, 0);
-    int tmp[size];
-    // divide in pos array and neg array
 
-    reduceMaxMin<<<blockCount, threadCount>>>(inputArray, g_maxdata, g_mindata, inputArrayPos, inputArrayNeg);
-
+    reduceMaxMin<<<blockCount, threadCount>>>(inputArray, g_maxdata, g_mindata);
     mycudaerror = cudaGetLastError();
     if (mycudaerror != cudaSuccess) {
         fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
         exit(1);
     }
-    reduceMaxMin_Service<<<1, THREADSIZE>>>(g_maxdata, g_mindata, largestNum, smallestNum, inputArrayPos, inputArrayNeg);
+    reduceMaxMin_Service<<<1, THREADSIZE>>>(g_maxdata, g_mindata, largestNum, smallestNum);
     mycudaerror = cudaGetLastError();
     if (mycudaerror != cudaSuccess) {
         fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
         exit(1);
-    }
-    cudaMemcpy(tmp, inputArrayPos, sizeof(int) * size, cudaMemcpyDeviceToHost);
-
-    for (int i = 0; i < size; i++) {
-        printf(" %d ", tmp[i]);
-    }
-    cudaMemcpy(tmp, inputArrayNeg, sizeof(int) * size, cudaMemcpyDeviceToHost);
-    printf("\nnegativi\n");
-    for (int i = 0; i < size; i++) {
-        printf(" %d ", tmp[i]);
     }
 
     cudaMemcpy(&max, largestNum, sizeof(int), cudaMemcpyDeviceToHost);

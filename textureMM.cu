@@ -16,18 +16,23 @@
         }                                                                 \
     }
 
-#define SIZE 8192 * 12 * 12
+#define SIZE 8192 * 12 * 12 * 12
 #define THREADSIZE 1024
 #define BLOCKSIZE ((SIZE - 1) / THREADSIZE + 1)
 #define RADIX 10
 #define MAXSM 12
 #define FILE_TO_OPEN "OURLASTCODE_shared_measures.csv"
 
-__global__ void copyKernel(int *inArray, int *semiSortArray, int arrayLength) {
+texture<int, 1> texture_semiSortArray;  // donotremove
+__device__ float fetch_radixArrayElement(int value) {
+    return tex1Dfetch(texture_semiSortArray, value);
+}
+
+__global__ void copyKernel(int *inArray, int offsette, int arrayLength) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (index < arrayLength) {
-        inArray[index] = semiSortArray[index];
+        inArray[index] = fetch_radixArrayElement(index + offsette);
     }
 }
 __global__ void reduceMaxMin(int *g_idata, int *g_maxdata, int *g_mindata) {
@@ -162,20 +167,33 @@ __global__ void combineBucket(int *blockBucketArray, int *bucketArray, int block
 
 __global__ void indexArrayKernel(int *radixArray, int *bucketArray, int *indexArray, int arrayLength, int significantDigit) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
-
+    __shared__ int prova;
+    if (threadIdx.x == 0) {
+        prova = bucketArray[blockIdx.x];
+    }
     int i;
     int radix;
     int pocket;
 
-    if (index < RADIX) {
+    for (i = threadIdx.x; i < arrayLength; i += blockDim.x) {
+        radix = radixArray[arrayLength - i - 1];
+        if (radix == blockIdx.x) {
+            pocket = prova--;
+            printf("sdasdadsd%d", pocket);
+            indexArray[arrayLength - i - 1] = pocket + 1;
+        }
+    }
+
+    /*if (index < RADIX) {
         for (i = 0; i < arrayLength; i++) {
             radix = radixArray[arrayLength - i - 1];
             if (radix == index) {
-                pocket = --bucketArray[radix];
+
+                pocket = --prova[radix];
                 indexArray[arrayLength - i - 1] = pocket;
             }
         }
-    }
+    }*/
 }
 
 __global__ void semiSortKernel(int *inArray, int *outArray, int *indexArray, int arrayLength, int significantDigit) {
@@ -183,7 +201,6 @@ __global__ void semiSortKernel(int *inArray, int *outArray, int *indexArray, int
 
     int arrayElement;
     int arrayIndex;
-    printf("\nalfredo\n");
     if (index < arrayLength) {
         arrayElement = inArray[index];
         arrayIndex = indexArray[index];
@@ -226,7 +243,8 @@ void radixSort(int *array, int size) {
     cudaEvent_t start, stop;
     int threadCount;
     int blockCount;
-
+    int pocket;
+    int radix;
     int min, max;
 
     cudaStream_t stream[MAXSM];
@@ -235,8 +253,9 @@ void radixSort(int *array, int size) {
         cudaStreamCreate(&stream[i]);
     threadCount = THREADSIZE;
     blockCount = BLOCKSIZE;
+
     int max_digit;
-    // da calcolare bene
+
     int *outputArray;
     int *inputArray;
     int *radixArray;
@@ -248,6 +267,12 @@ void radixSort(int *array, int size) {
     int *g_mindata;
     int *largestNum;
     int *smallestNum;
+
+    int new_size_first = size / MAXSM + size % MAXSM;
+    int new_size_second = size / MAXSM;
+    int my_size, offset = 0;
+    int new_block_size;
+
     CUDA_CHECK(cudaMalloc((void **)&inputArray, sizeof(int) * size));
     CUDA_CHECK(cudaMalloc((void **)&indexArray, sizeof(int) * size));
 
@@ -262,13 +287,27 @@ void radixSort(int *array, int size) {
     CUDA_CHECK(cudaMalloc((void **)&bucketArray, sizeof(int) * RADIX));
     CUDA_CHECK(cudaMalloc((void **)&blockBucketArray, sizeof(int) * RADIX * BLOCKSIZE));
 
-    cudaMemcpy(inputArray, array, sizeof(int) * size, cudaMemcpyHostToDevice);
-
     cudaMalloc((void **)&largestNum, sizeof(int));
     cudaMalloc((void **)&smallestNum, sizeof(int));
 
+    for (int j = 1; j <= MAXSM; j++) {
+        if (j == 1) {
+            cudaMemcpyAsync(inputArray, array, new_size_first * sizeof(int), cudaMemcpyHostToDevice, stream[j]);
+            /*  my_size = new_size_first;
+              offset = 0;*/
+        } else {
+            cudaMemcpyAsync(inputArray + new_size_second * (j - 1) + size % MAXSM, array + new_size_second * (j - 1) + size % MAXSM, new_size_second * sizeof(int), cudaMemcpyHostToDevice, stream[j]);
+            /*  my_size = new_size_second;
+              offset = new_size_second * (j - 1) + size % MAXSM;*/
+        }
+    }
+
     cudaError_t mycudaerror;
     mycudaerror = cudaGetLastError();
+    cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<int>();
+    mycudaerror = cudaBindTexture(0, texture_semiSortArray, semiSortArray, channelDesc);
+    if (mycudaerror != cudaSuccess) printf("can not bind semiSortArray to texture \n");
+
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     cudaEventRecord(start, 0);
@@ -288,33 +327,93 @@ void radixSort(int *array, int size) {
 
     cudaMemcpy(&max, largestNum, sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(&min, smallestNum, sizeof(int), cudaMemcpyDeviceToHost);
-    int new_size_first = size / MAXSM + size % MAXSM;
-    int new_size_second = size / MAXSM;
-    int my_size, offset = 0;
-    int new_block_size;
 
-    int *myradix = (int *)malloc(size * sizeof(int));
-    int mycsoa = 1;
-    int bucket[RADIX];
+    int *bucket = (int *)malloc(RADIX * sizeof(int));
+    int *CPUradixArray = (int *)malloc(size * sizeof(int));
+    int *CPUindexArray = (int *)malloc(size * sizeof(int));
+
     max_digit = max - min;
     for (int j = 1; j <= MAXSM; j++) {
         if (j == 1) {
-            cudaMemcpyAsync(inputArray, array, new_size_first * sizeof(int), cudaMemcpyHostToDevice, stream[j]);
             my_size = new_size_first;
             offset = 0;
         } else {
-            cudaMemcpyAsync(inputArray + new_size_second * (j - 1) + size % MAXSM, array + new_size_second * (j - 1) + size % MAXSM, new_size_second * sizeof(int), cudaMemcpyHostToDevice, stream[j]);
             my_size = new_size_second;
             offset = new_size_second * (j - 1) + size % MAXSM;
         }
     }
 
-    while (true) {
+    while (max_digit / significantDigit > 0) {
         for (int k = 0; k < RADIX; k++)
             bucket[k] = 0;
-        printf(" ordino le %d\n", significantDigit);
         resetBucket<<<BLOCKSIZE, RADIX>>>(blockBucketArray);
-        resetBucket<<<BLOCKSIZE, THREADSIZE>>>(semiSortArray);
+        for (int j = 1; j <= MAXSM; j++) {
+            if (j == 1) {
+                my_size = new_size_first;
+                offset = 0;
+            } else {
+                my_size = new_size_second;
+                offset = new_size_second * (j - 1) + size % MAXSM;
+            }
+
+            new_block_size = (my_size - 1) / THREADSIZE + 1;
+
+            histogramKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, blockBucketArray, radixArray + offset, my_size, significantDigit, min);
+
+            mycudaerror = cudaGetLastError();
+            if (mycudaerror != cudaSuccess) {
+                fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
+                exit(1);
+            }
+
+            // calcolo la frequenza per ogni cifra, sommando quelle di tutti i block.
+            // fondamentalmente sommo all'array delle frequenze il precedente, come facevamo nel vecchio algortimo. A[i-1] = A[i]
+            combineBucket<<<1, RADIX, 0, stream[j]>>>(blockBucketArray, bucketArray, new_block_size);
+
+            mycudaerror = cudaGetLastError();
+            if (mycudaerror != cudaSuccess) {
+                fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
+                exit(1);
+            }
+        }
+
+        // reduce bucketArray
+
+        // salva gli indici in cui memorizzare gli elementi ordinati --> fa la magia :D
+
+        cudaMemcpy(CPUradixArray, radixArray, sizeof(int) * size, cudaMemcpyDeviceToHost);
+        cudaMemcpy(bucket, bucketArray, sizeof(int) * RADIX, cudaMemcpyDeviceToHost);
+        for (int c = 0; c < size; c++) {
+            radix = CPUradixArray[size - c - 1];
+            pocket = --bucket[radix];
+            CPUindexArray[size - c - 1] = pocket;
+        }
+        cudaMemcpy(indexArray, CPUindexArray, sizeof(int) * size, cudaMemcpyHostToDevice);
+
+        cudaThreadSynchronize();
+
+        mycudaerror = cudaGetLastError();
+        if (mycudaerror != cudaSuccess) {
+            fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
+            exit(1);
+        }
+        for (int j = 1; j <= MAXSM; j++) {
+            if (j == 1) {
+                my_size = new_size_first;
+                offset = 0;
+            } else {
+                my_size = new_size_second;
+                offset = new_size_second * (j - 1) + size % MAXSM;
+            }
+            new_block_size = (my_size - 1) / THREADSIZE + 1;
+            // salva gli elementi nella corretta posizione ordinati.
+            semiSortKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, semiSortArray, indexArray + offset, my_size, significantDigit);
+            mycudaerror = cudaGetLastError();
+            if (mycudaerror != cudaSuccess) {
+                fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
+                exit(1);
+            }
+        }
         cudaThreadSynchronize();
         for (int j = 1; j <= MAXSM; j++) {
             if (j == 1) {
@@ -324,91 +423,19 @@ void radixSort(int *array, int size) {
                 my_size = new_size_second;
                 offset = new_size_second * (j - 1) + size % MAXSM;
             }
-
             new_block_size = (my_size - 1) / THREADSIZE + 1;
-            cudaMemcpyAsync(bucketArray, bucket, sizeof(int) * RADIX, cudaMemcpyHostToDevice, stream[j]);
-            histogramKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, blockBucketArray, radixArray + offset, my_size, significantDigit, min);
+            copyKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, offset, my_size);
 
-            mycudaerror = cudaGetLastError();
-            if (mycudaerror != cudaSuccess) {
-                fprintf(stderr, "eheheh%s\n", cudaGetErrorString(mycudaerror));
-                exit(1);
-            }
-
-            // calcolo la frequenza per ogni cifra, sommando quelle di tutti i block.
-            // fondamentalmente sommo all'array delle frequenze il precedente, come facevamo nel vecchio algortimo. A[i-1] = A[i]
-            combineBucket<<<1, RADIX, 0, stream[j]>>>(blockBucketArray, bucketArray, new_block_size);
-            cudaThreadSynchronize();
             mycudaerror = cudaGetLastError();
             if (mycudaerror != cudaSuccess) {
                 fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
                 exit(1);
             }
         }
-        /* int *tuttublock = (int *)malloc(RADIX * BLOCKSIZE * sizeof(int));
-         cudaMemcpy(tuttublock, bucketArray, sizeof(int) * RADIX, cudaMemcpyDeviceToHost);
-         printf("\nblockbucketararay: ");
-         for (int k = 0; k < RADIX; k++)
-             printf(" %d ", tuttublock[k]);
-         int arraybucket[10];
-         for (int k = 0; k < 10; k++) {
-             arraybucket[k] = 0;
-         }
-         printf("\nmiocoso:\t ");
-         for (int k = 0; k < size; k++) {
-             arraybucket[(array[k] / mycsoa) % 10]++;
-         }
-         mycsoa *= 10;
-         for (int k = 1; k < 10; k++) {
-             arraybucket[k] += arraybucket[k - 1];
-         }
-         for (int k = 0; k < 10; k++) {
-             printf(" %d ", arraybucket[k]);
-         }*/
-
-        // reduce bucketArray
-        // salva gli indici in cui memorizzare gli elementi ordinati --> fa la magia :D
-        indexArrayKernel<<<BLOCKSIZE, THREADSIZE>>>(radixArray, bucketArray, indexArray, size, significantDigit);
-
-        mycudaerror = cudaGetLastError();
-        if (mycudaerror != cudaSuccess) {
-            fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
-            exit(1);
-        }
-        for (int j = 1; j <= MAXSM; j++) {
-            if (j == 1) {
-                my_size = new_size_first;
-                offset = 0;
-            } else {
-                my_size = new_size_second;
-                offset = new_size_second * (j - 1) + size % MAXSM;
-            }
-            printf("aahfleabeto");
-            new_block_size = (my_size - 1) / THREADSIZE + 1;
-            // salva gli elementi nella corretta posizione ordinati.
-            semiSortKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, semiSortArray, indexArray + offset, my_size, significantDigit);
-        }
-
-        mycudaerror = cudaGetLastError();
-        if (mycudaerror != cudaSuccess) {
-            fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
-            exit(1);
-        }
-        // aggiorno inputArray con il semisortedarray
-        copyKernel<<<BLOCKSIZE, THREADSIZE>>>(inputArray, semiSortArray, size);
-
-        mycudaerror = cudaGetLastError();
-        if (mycudaerror != cudaSuccess) {
-            fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
-            exit(1);
-        }
-        // cudaMemcpy(array, inputArray, sizeof(int) * size, cudaMemcpyDeviceToHost);
 
         significantDigit *= RADIX;
-        break;
     }
     cudaMemcpy(array, inputArray, sizeof(int) * size, cudaMemcpyDeviceToHost);
-    printf("ESCODALDOPPIOFOR");
     cudaEventRecord(stop, 0);
     cudaEventSynchronize(stop);
     float transferTime;

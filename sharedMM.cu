@@ -303,11 +303,11 @@ void radixSort(int *array, int size) {
     max_digit = max - min;
     for (int j = 1; j <= MAXSM; j++) {
         if (j == 1) {
-            cudaMemcpyAsync(inputArray, array, new_size_first * sizeof(int), cudaMemcpyHostToDevice, stream[j]);
+            // cudaMemcpyAsync(inputArray, array, new_size_first * sizeof(int), cudaMemcpyHostToDevice, stream[j]);
             my_size = new_size_first;
             offset = 0;
         } else {
-            cudaMemcpyAsync(inputArray + new_size_second * (j - 1) + size % MAXSM, array + new_size_second * (j - 1) + size % MAXSM, new_size_second * sizeof(int), cudaMemcpyHostToDevice, stream[j]);
+            // cudaMemcpyAsync(inputArray + new_size_second * (j - 1) + size % MAXSM, array + new_size_second * (j - 1) + size % MAXSM, new_size_second * sizeof(int), cudaMemcpyHostToDevice, stream[j]);
             my_size = new_size_second;
             offset = new_size_second * (j - 1) + size % MAXSM;
         }

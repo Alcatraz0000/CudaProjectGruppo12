@@ -30,6 +30,7 @@ __global__ void copyKernel(int *inArray, int *semiSortArray, int arrayLength) {
         inArray[index] = semiSortArray[index];
     }
 }
+
 __global__ void reduceMaxMin(int *g_idata, int *g_maxdata, int *g_mindata, int *pos, int *neg) {
     __shared__ int smaxdata[(SIZE / BLOCKSIZE)];  // each thread loads one element from global to shared mem unsigned
     __shared__ int smindata[(SIZE / BLOCKSIZE)];  // each thread loads one element from global to shared mem unsigned

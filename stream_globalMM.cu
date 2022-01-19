@@ -319,8 +319,9 @@ void radixSort(int *array, int size) {
             offset = new_size_second * (j - 1) + size % MAXSM;
         }
     }
-
+    printf("prima del while");
     while (max_digit / significantDigit > 0) {
+        printf("non fa i vwige;");
         resetBucket<<<BLOCKSIZE, RADIX>>>(blockBucketArray);
         for (int j = 1; j <= MAXSM; j++) {
             if (j == 1) {
@@ -333,7 +334,7 @@ void radixSort(int *array, int size) {
 
             new_block_size = (my_size - 1) / THREADSIZE + 1;
 
-            histogramKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, blockBucketArray, radixArray + offset, my_size, significantDigit, min, inArrayShared, outArrayShared, radixArrayShared);
+            histogramKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, blockBucketArray, radixArray + offset, my_size, significantDigit, min, inArrayShared + offset, outArrayShared, radixArrayShared + offset);
 
             mycudaerror = cudaGetLastError();
             if (mycudaerror != cudaSuccess) {
@@ -407,7 +408,6 @@ void radixSort(int *array, int size) {
                 exit(1);
             }
         }
-
         significantDigit *= RADIX;
     }
     cudaMemcpy(array, inputArray, sizeof(int) * size, cudaMemcpyDeviceToHost);

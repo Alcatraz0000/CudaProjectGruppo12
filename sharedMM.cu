@@ -16,7 +16,7 @@
         }                                                                 \
     }
 
-#define SIZE 8192 * 12 * 12
+#define SIZE 8192 * 12 * 12 * 12
 #define THREADSIZE 1024
 #define BLOCKSIZE ((SIZE - 1) / THREADSIZE + 1)
 #define RADIX 10
@@ -265,11 +265,23 @@ void radixSort(int *array, int size) {
     CUDA_CHECK(cudaMalloc((void **)&semiSortArray, sizeof(int) * size));
     CUDA_CHECK(cudaMalloc((void **)&bucketArray, sizeof(int) * RADIX));
     CUDA_CHECK(cudaMalloc((void **)&blockBucketArray, sizeof(int) * RADIX * BLOCKSIZE));
-
-    cudaMemcpy(inputArray, array, sizeof(int) * size, cudaMemcpyHostToDevice);
-
+    int new_size_first = size / MAXSM + size % MAXSM;
+    int new_size_second = size / MAXSM;
+    int my_size, offset = 0;
+    int new_block_size;
     cudaMalloc((void **)&largestNum, sizeof(int));
     cudaMalloc((void **)&smallestNum, sizeof(int));
+    for (int j = 1; j <= MAXSM; j++) {
+        if (j == 1) {
+            cudaMemcpyAsync(inputArray, array, new_size_first * sizeof(int), cudaMemcpyHostToDevice, stream[j]);
+            my_size = new_size_first;
+            offset = 0;
+        } else {
+            cudaMemcpyAsync(inputArray + new_size_second * (j - 1) + size % MAXSM, array + new_size_second * (j - 1) + size % MAXSM, new_size_second * sizeof(int), cudaMemcpyHostToDevice, stream[j]);
+            my_size = new_size_second;
+            offset = new_size_second * (j - 1) + size % MAXSM;
+        }
+    }
 
     cudaError_t mycudaerror;
     mycudaerror = cudaGetLastError();
@@ -292,10 +304,6 @@ void radixSort(int *array, int size) {
 
     cudaMemcpy(&max, largestNum, sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(&min, smallestNum, sizeof(int), cudaMemcpyDeviceToHost);
-    int new_size_first = size / MAXSM + size % MAXSM;
-    int new_size_second = size / MAXSM;
-    int my_size, offset = 0;
-    int new_block_size;
 
     int *myradix = (int *)malloc(size * sizeof(int));
     int mycsoa = 1;
@@ -329,7 +337,7 @@ void radixSort(int *array, int size) {
             }
 
             new_block_size = (my_size - 1) / THREADSIZE + 1;
-            cudaMemcpyAsync(bucketArray, bucket, sizeof(int) * RADIX, cudaMemcpyHostToDevice, stream[j]);
+            // cudaMemcpyAsync(bucketArray, bucket, sizeof(int) * RADIX, cudaMemcpyHostToDevice, stream[j]);
             histogramKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, blockBucketArray, radixArray + offset, my_size, significantDigit, min);
 
             mycudaerror = cudaGetLastError();

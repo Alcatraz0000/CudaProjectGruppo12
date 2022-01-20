@@ -206,9 +206,9 @@ void make_csv(float gflops, float time, float N) {
 
     } else {
         fp = fopen(FILE_TO_OPEN, "w");
-        fprintf(fp, "N, gflops, time_sec\n");
+        fprintf(fp, "N, BlockSize, GridSize, gflops, time_sec\n");
     }
-    fprintf(fp, "%f, %f, %.5f\n", N, gflops, time);
+    fprintf(fp, "%f, %d, %d, %f, %.5f\n", N, THREADSIZE, BLOCKSIZE gflops, time);
     fclose(fp);
 }
 

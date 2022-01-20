@@ -91,34 +91,36 @@ __global__ void histogramKernel(int *inArray, int *outArray, int *radixArray, in
     int radix;
     int arrayElement;
     int i;
-
+    if (index > arrayLength) {
+        return;
+    }
     if (thread == 0) {
         for (i = 0; i < RADIX; i++) {
-            outArray[i] = 0;
+            outArrayShared[blockIndex + i] = 0;
         }
     }
 
     if (index < arrayLength) {
-        inArrayShared[thread] = inArray[index];
+        inArrayShared[index] = inArray[index];
     }
 
     __syncthreads();
 
     if (index < arrayLength) {
-        arrayElement = inArrayShared[thread] - minElement;
+        arrayElement = inArrayShared[index] - minElement;
         radix = ((arrayElement / significantDigit) % 10);
-        radixArrayShared[thread] = radix;
-        atomicAdd(&outArray[blockIndex + radix], 1);
+        radixArrayShared[index] = radix;
+        atomicAdd(&outArrayShared[blockIndex + radix], 1);
     }
 
     if (index < arrayLength) {
-        radixArray[index] = radixArrayShared[thread];
+        radixArray[index] = radixArrayShared[index];
     }
     __syncthreads();
     // forse possimao fare il casino che diventa supermegaultravelocissimo !!!!!!
     if (thread == 0) {
         for (i = 0; i < RADIX; i++) {
-            outArray[blockIndex + i] = outArrayShared[i];
+            outArray[blockIndex + i] += outArrayShared[blockIndex + i];
         }
     }
 }
@@ -134,10 +136,12 @@ __global__ void combineBucket(int *blockBucketArray, int *bucketArray, int block
     }
     __syncthreads();
     if (threadIdx.x == 0) {
-        for (i = 1; i < RADIX; i++)
+        for (i = 1; i < RADIX; i++){
             bucketArrayShared[i] += bucketArrayShared[i - 1];
+        }
     }
     __syncthreads();
+    
     bucketArray[index] = bucketArrayShared[index];
 }
 
@@ -251,9 +255,9 @@ void radixSort(int *array, int size) {
     int new_block_size;
     CUDA_CHECK(cudaMalloc((void **)&bucketArrayShared, sizeof(int) * RADIX));
 
-    CUDA_CHECK(cudaMalloc((void **)&inArrayShared, sizeof(int) * THREADSIZE));
-    CUDA_CHECK(cudaMalloc((void **)&outArrayShared, sizeof(int) * RADIX));
-    CUDA_CHECK(cudaMalloc((void **)&radixArrayShared, sizeof(int) * THREADSIZE));
+    CUDA_CHECK(cudaMalloc((void **)&inArrayShared, sizeof(int) * size));
+    CUDA_CHECK(cudaMalloc((void **)&outArrayShared, sizeof(int) * RADIX * BLOCKSIZE));
+    CUDA_CHECK(cudaMalloc((void **)&radixArrayShared, sizeof(int) * size));
 
     CUDA_CHECK(cudaMalloc((void **)&inputArray, sizeof(int) * size));
     CUDA_CHECK(cudaMalloc((void **)&indexArray, sizeof(int) * size));
@@ -335,7 +339,7 @@ void radixSort(int *array, int size) {
             new_block_size = (my_size - 1) / THREADSIZE + 1;
 
             histogramKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, blockBucketArray, radixArray + offset, my_size, significantDigit, min, inArrayShared + offset, outArrayShared, radixArrayShared + offset);
-
+            
             mycudaerror = cudaGetLastError();
             if (mycudaerror != cudaSuccess) {
                 fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
@@ -345,7 +349,8 @@ void radixSort(int *array, int size) {
             // calcolo la frequenza per ogni cifra, sommando quelle di tutti i block.
             // fondamentalmente sommo all'array delle frequenze il precedente, come facevamo nel vecchio algortimo. A[i-1] = A[i]
             combineBucket<<<1, RADIX, 0, stream[j]>>>(blockBucketArray, bucketArray, new_block_size, bucketArrayShared);
-
+            cudaMemcpy(bucket, bucketArray, sizeof(int) * RADIX, cudaMemcpyDeviceToHost);
+            
             mycudaerror = cudaGetLastError();
             if (mycudaerror != cudaSuccess) {
                 fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
@@ -358,7 +363,9 @@ void radixSort(int *array, int size) {
         // salva gli indici in cui memorizzare gli elementi ordinati --> fa la magia :D
 
         cudaMemcpy(CPUradixArray, radixArray, sizeof(int) * size, cudaMemcpyDeviceToHost);
-        cudaMemcpy(bucket, bucketArray, sizeof(int) * RADIX, cudaMemcpyDeviceToHost);
+        
+        //cudaMemcpy(bucket, bucketArray, sizeof(int) * RADIX, cudaMemcpyDeviceToHost);
+        
         for (int c = 0; c < size; c++) {
             radix = CPUradixArray[size - c - 1];
             pocket = --bucket[radix];
@@ -436,14 +443,14 @@ int main() {
     int *array;
     cudaMallocHost((void **)&array, size * sizeof(int));
     int i;
-    int max_digit = 9999;
+    int max_digit = 999999;
     srand(time(NULL));
 
     for (i = 0; i < size; i++) {
         if (i % 2)
-            array[i] = -(rand() % max_digit);
+            array[i] = -(i % max_digit);
         else
-            array[i] = (rand() % max_digit);
+            array[i] = (i % max_digit);
     }
 
     // printf("\nUnsorted List: ");
@@ -456,8 +463,8 @@ int main() {
             break;
         }
 
-    // printf("\nSorted List:");
-    // printArray(array, size);
+     //printf("\nSorted List:");
+     //printArray(array, size);
 
     printf("\n");
 

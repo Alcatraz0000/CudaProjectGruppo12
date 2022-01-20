@@ -136,12 +136,12 @@ __global__ void combineBucket(int *blockBucketArray, int *bucketArray, int block
     }
     __syncthreads();
     if (threadIdx.x == 0) {
-        for (i = 1; i < RADIX; i++){
+        for (i = 1; i < RADIX; i++) {
             bucketArrayShared[i] += bucketArrayShared[i - 1];
         }
     }
     __syncthreads();
-    
+
     atomicAdd(&bucketArray[index], bucketArrayShared[index]);
 }
 
@@ -201,9 +201,9 @@ void make_csv(float gflops, float time, float N) {
 
     } else {
         fp = fopen(FILE_TO_OPEN, "w");
-        fprintf(fp, "N, gflops, time_sec\n");
+        fprintf(fp, "N, BlockSize, GridSize, gflops, time_sec\n");
     }
-    fprintf(fp, "%f, %f, %.5f\n", N, gflops, time);
+    fprintf(fp, "%f, %d, %d, %f, %.5f\n", N, THREADSIZE, BLOCKSIZE, gflops, time / 1000);
     fclose(fp);
 }
 __global__ void resetBucket(int *bucket) {
@@ -338,20 +338,18 @@ void radixSort(int *array, int size) {
 
             new_block_size = (my_size - 1) / THREADSIZE + 1;
 
-            histogramKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, blockBucketArray + (j - 1) * new_block_size * RADIX , radixArray + offset, my_size, significantDigit, min, inArrayShared + offset, outArrayShared, radixArrayShared + offset);
-            
+            histogramKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, blockBucketArray + (j - 1) * new_block_size * RADIX, radixArray + offset, my_size, significantDigit, min, inArrayShared + offset, outArrayShared, radixArrayShared + offset);
+
             mycudaerror = cudaGetLastError();
             if (mycudaerror != cudaSuccess) {
                 fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
                 exit(1);
             }
-            
 
             // calcolo la frequenza per ogni cifra, sommando quelle di tutti i block.
             // fondamentalmente sommo all'array delle frequenze il precedente, come facevamo nel vecchio algortimo. A[i-1] = A[i]
             combineBucket<<<1, RADIX, 0, stream[j]>>>(blockBucketArray + (j - 1) * new_block_size * RADIX, bucketArray, new_block_size, bucketArrayShared + RADIX * (j - 1));
-            
-            
+
             mycudaerror = cudaGetLastError();
             if (mycudaerror != cudaSuccess) {
                 fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
@@ -364,9 +362,9 @@ void radixSort(int *array, int size) {
         // salva gli indici in cui memorizzare gli elementi ordinati --> fa la magia :D
 
         cudaMemcpy(CPUradixArray, radixArray, sizeof(int) * size, cudaMemcpyDeviceToHost);
-        
+
         cudaMemcpy(bucket, bucketArray, sizeof(int) * RADIX, cudaMemcpyDeviceToHost);
-        
+
         for (int c = 0; c < size; c++) {
             radix = CPUradixArray[size - c - 1];
             pocket = --bucket[radix];
@@ -437,7 +435,7 @@ void radixSort(int *array, int size) {
 }
 
 int main() {
-    printf("\n\nRunning Radix eeSort Example in C!\n");
+    printf("\n\nRunning Radix Sort Example in C!\n");
     printf("----------------------------------\n");
 
     int size = SIZE;
@@ -460,12 +458,12 @@ int main() {
     radixSort(array, size);
     for (int i = 1; i < size; i++)
         if (array[i - 1] > array[i]) {
-            printf("SE SCASSATT O PUNTATOR, %d, %d, alla pos; %d",array[i - 1] , array[i], i);
+            printf("SE SCASSATT O PUNTATOR, %d, %d, alla pos; %d", array[i - 1], array[i], i);
             break;
         }
 
-     //printf("\nSorted List:");
-     //printArray(array, size);
+    // printf("\nSorted List:");
+    // printArray(array, size);
 
     printf("\n");
 

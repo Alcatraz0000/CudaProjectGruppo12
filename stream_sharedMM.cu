@@ -17,10 +17,11 @@
     }
 
 #define SIZE 8192 * 12 * 12 * 12
-#define THREADSIZE 1024
+#define THREADSIZE 512
 #define BLOCKSIZE ((SIZE - 1) / THREADSIZE + 1)
 #define RADIX 10
 #define MAXSM 12
+#define BLOCKxSM (2048 / THREADSIZE)
 #define FILE_TO_OPEN "OURLASTCODE_shared_measures.csv"
 
 __global__ void copyKernel(int *inArray, int *semiSortArray, int arrayLength) {
@@ -39,7 +40,7 @@ __global__ void reduceMaxMin(int *g_idata, int *g_maxdata, int *g_mindata) {
     smaxdata[tid] = g_idata[i];
     smindata[tid] = g_idata[i];
     __syncthreads();  // do reduction in shared mem
-    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+    for (unsigned int s = blockDim.x / BLOCKxSM; s > 0; s >>= 1) {
         if (tid < s) {
             if (smaxdata[tid + s] > smaxdata[tid]) {
                 smaxdata[tid] = smaxdata[tid + s];
@@ -48,7 +49,6 @@ __global__ void reduceMaxMin(int *g_idata, int *g_maxdata, int *g_mindata) {
                 smindata[tid] = smindata[tid + s];
             }
         }
-        __syncthreads();
     }
 
     // write result for this block to global mem
@@ -72,7 +72,7 @@ __global__ void reduceMaxMin_Service(int *g_maxdata, int *g_mindata, int *max, i
             smindata[tid] = g_mindata[index];
     }
     __syncthreads();  // do reduction in shared mem
-    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+    for (unsigned int s = blockDim.x / BLOCKxSM; s > 0; s >>= 1) {
         if (tid < s) {
             if (smaxdata[tid + s] > smaxdata[tid]) {
                 smaxdata[tid] = smaxdata[tid + s];
@@ -81,7 +81,6 @@ __global__ void reduceMaxMin_Service(int *g_maxdata, int *g_mindata, int *max, i
                 smindata[tid] = smindata[tid + s];
             }
         }
-        __syncthreads();
     }
     // write result for this block to global mem
     if (tid == 0) {
@@ -110,13 +109,12 @@ __global__ void histogramKernel(int *inArray, int *outArray, int *radixArray, in
     int i;
 
     if (thread < RADIX) {
-      outArrayShared[thread] = 0;
+        outArrayShared[thread] = 0;
     }
-
+    __syncthreads();
     if (index < arrayLength) {
         inArrayShared[thread] = inArray[index];
-    
-  
+
         arrayElement = inArrayShared[thread] - minElement;
         radix = ((arrayElement / significantDigit) % 10);
         radixArrayShared[thread] = radix;
@@ -151,8 +149,6 @@ __global__ void combineBucket(int *blockBucketArray, int *bucketArray, int block
             bucketArrayShared[i] += bucketArrayShared[i - 1];
         }
     }
-
-    __syncthreads();
     atomicAdd(&bucketArray[index], bucketArrayShared[index]);
 }
 
@@ -171,7 +167,7 @@ __global__ void semiSortKernel(int *inArray, int *outArray, int *indexArray, int
 void printArray(int *array, int size) {
     int i;
     printf("[ ");
-    for (i = 0; i < size; i++)
+    for (i = 0; i < 1000; i++)
         printf("%d ", array[i]);
     printf("]\n");
 }
@@ -192,12 +188,11 @@ void make_csv(float gflops, float time, float N) {
 
     } else {
         fp = fopen(FILE_TO_OPEN, "w");
-        fprintf(fp, "N, gflops, time_sec\n");
+        fprintf(fp, "N, BlockSize, GridSize, gflops, time_sec\n");
     }
-    fprintf(fp, "%f, %f, %.5f\n", N, gflops, time);
+    fprintf(fp, "%f, %d, %d, %f, %.5f\n", N, THREADSIZE, BLOCKSIZE, gflops, time / 1000);
     fclose(fp);
 }
-
 void radixSort(int *array, int size) {
     int significantDigit = 1;
     cudaEvent_t start, stop;
@@ -228,8 +223,7 @@ void radixSort(int *array, int size) {
     int *largestNum;
     int *smallestNum;
 
-    int new_size_first = size / MAXSM + size % MAXSM;
-    int new_size_second = size / MAXSM;
+    int new_size_first = size / MAXSM;
     int my_size, offset = 0;
     int new_block_size;
 
@@ -251,11 +245,7 @@ void radixSort(int *array, int size) {
     cudaMalloc((void **)&smallestNum, sizeof(int));
 
     for (int j = 1; j <= MAXSM; j++) {
-        if (j == 1)
-            cudaMemcpyAsync(inputArray, array, new_size_first * sizeof(int), cudaMemcpyHostToDevice, stream[j]);
-
-        else
-            cudaMemcpyAsync(inputArray + new_size_second * (j - 1) + size % MAXSM, array + new_size_second * (j - 1) + size % MAXSM, new_size_second * sizeof(int), cudaMemcpyHostToDevice, stream[j]);
+        cudaMemcpyAsync(inputArray + new_size_first * (j - 1), array + new_size_first * (j - 1), new_size_first * sizeof(int), cudaMemcpyHostToDevice, stream[j]);
     }
 
     cudaError_t mycudaerror;
@@ -285,31 +275,17 @@ void radixSort(int *array, int size) {
     int *CPUindexArray = (int *)malloc(size * sizeof(int));
 
     max_digit = max - min;
-    for (int j = 1; j <= MAXSM; j++) {
-        if (j == 1) {
-            my_size = new_size_first;
-            offset = 0;
-        } else {
-            my_size = new_size_second;
-            offset = new_size_second * (j - 1) + size % MAXSM;
-        }
-    }
 
     while (max_digit / significantDigit > 0) {
         resetBucket<<<BLOCKSIZE, RADIX>>>(blockBucketArray);
         resetBucket<<<1, RADIX>>>(bucketArray);
         for (int j = 1; j <= MAXSM; j++) {
-            if (j == 1) {
-                my_size = new_size_first;
-                offset = 0;
-            } else {
-                my_size = new_size_second;
-                offset = new_size_second * (j - 1) + size % MAXSM;
-            }
+            my_size = new_size_first;
+            offset = new_size_first * (j - 1);
 
             new_block_size = (my_size - 1) / THREADSIZE + 1;
 
-            histogramKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, blockBucketArray + (j - 1) * new_block_size * RADIX , radixArray + offset, my_size, significantDigit, min);
+            histogramKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, blockBucketArray + (j - 1) * new_block_size * RADIX, radixArray + offset, my_size, significantDigit, min);
 
             mycudaerror = cudaGetLastError();
             if (mycudaerror != cudaSuccess) {
@@ -334,6 +310,7 @@ void radixSort(int *array, int size) {
 
         cudaMemcpy(CPUradixArray, radixArray, sizeof(int) * size, cudaMemcpyDeviceToHost);
         cudaMemcpy(bucket, bucketArray, sizeof(int) * RADIX, cudaMemcpyDeviceToHost);
+
         for (int c = 0; c < size; c++) {
             radix = CPUradixArray[size - c - 1];
             pocket = --bucket[radix];
@@ -341,21 +318,15 @@ void radixSort(int *array, int size) {
         }
         cudaMemcpy(indexArray, CPUindexArray, sizeof(int) * size, cudaMemcpyHostToDevice);
 
-        
-
         mycudaerror = cudaGetLastError();
         if (mycudaerror != cudaSuccess) {
             fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
             exit(1);
         }
         for (int j = 1; j <= MAXSM; j++) {
-            if (j == 1) {
-                my_size = new_size_first;
-                offset = 0;
-            } else {
-                my_size = new_size_second;
-                offset = new_size_second * (j - 1) + size % MAXSM;
-            }
+            my_size = new_size_first;
+            offset = new_size_first * (j - 1);
+
             new_block_size = (my_size - 1) / THREADSIZE + 1;
             // salva gli elementi nella corretta posizione ordinati.
             semiSortKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, semiSortArray, indexArray + offset, my_size, significantDigit);
@@ -365,15 +336,10 @@ void radixSort(int *array, int size) {
                 exit(1);
             }
         }
-        cudaThreadSynchronize();
         for (int j = 1; j <= MAXSM; j++) {
-            if (j == 1) {
-                my_size = new_size_first;
-                offset = 0;
-            } else {
-                my_size = new_size_second;
-                offset = new_size_second * (j - 1) + size % MAXSM;
-            }
+            my_size = new_size_first;
+            offset = new_size_first * (j - 1);
+
             new_block_size = (my_size - 1) / THREADSIZE + 1;
             copyKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, semiSortArray + offset, my_size);
 
@@ -432,8 +398,8 @@ int main() {
             break;
         }
 
-    // printf("\nSorted List:");
-    // printArray(array, size);
+    printf("\nSorted List:");
+    printArray(array, size);
 
     printf("\n");
 

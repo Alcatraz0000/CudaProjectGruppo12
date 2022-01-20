@@ -208,10 +208,9 @@ void make_csv(float gflops, float time, float N) {
         fp = fopen(FILE_TO_OPEN, "w");
         fprintf(fp, "N, BlockSize, GridSize, gflops, time_sec\n");
     }
-    fprintf(fp, "%f, %d, %d, %f, %.5f\n", N, THREADSIZE, BLOCKSIZE gflops, time);
+    fprintf(fp, "%f, %d, %d, %f, %.5f\n", N, THREADSIZE, BLOCKSIZE, gflops, time / 1000);
     fclose(fp);
 }
-
 void radixSort(int *array, int size) {
     int significantDigit = 1;
     cudaEvent_t start, stop;

@@ -17,11 +17,12 @@
     }
 
 #define SIZE 8192 * 12 * 12 * 12
-#define THREADSIZE 1024
+#define THREADSIZE 512
 #define BLOCKSIZE ((SIZE - 1) / THREADSIZE + 1)
 #define RADIX 10
 #define MAXSM 12
-#define FILE_TO_OPEN "SHRD2_shared_measures.csv"
+#define BLOCKxSM (2048 / THREADSIZE)
+#define FILE_TO_OPEN "OURLASTCODE_shared_measures.csv"
 
 texture<int, 1> texture_semiSortArray;  // donotremove
 __device__ float fetch_radixArrayElement(int value) {
@@ -44,7 +45,7 @@ __global__ void reduceMaxMin(int *g_idata, int *g_maxdata, int *g_mindata) {
     smaxdata[tid] = g_idata[i];
     smindata[tid] = g_idata[i];
     __syncthreads();  // do reduction in shared mem
-    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+    for (unsigned int s = blockDim.x / BLOCKxSM; s > 0; s >>= 1) {
         if (tid < s) {
             if (smaxdata[tid + s] > smaxdata[tid]) {
                 smaxdata[tid] = smaxdata[tid + s];
@@ -53,15 +54,14 @@ __global__ void reduceMaxMin(int *g_idata, int *g_maxdata, int *g_mindata) {
                 smindata[tid] = smindata[tid + s];
             }
         }
-        __syncthreads();
-    }  // write result for this block to global mem
+    }
 
+    // write result for this block to global mem
     if (tid == 0) {
         g_maxdata[blockIdx.x] = smaxdata[0];
         g_mindata[blockIdx.x] = smindata[0];
     }
 }
-
 __global__ void reduceMaxMin_Service(int *g_maxdata, int *g_mindata, int *max, int *min) {
     __shared__ int smaxdata[(THREADSIZE)];  // each thread loads one element from global to shared mem unsigned
     __shared__ int smindata[(THREADSIZE)];
@@ -76,7 +76,7 @@ __global__ void reduceMaxMin_Service(int *g_maxdata, int *g_mindata, int *max, i
             smindata[tid] = g_mindata[index];
     }
     __syncthreads();  // do reduction in shared mem
-    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+    for (unsigned int s = blockDim.x / BLOCKxSM; s > 0; s >>= 1) {
         if (tid < s) {
             if (smaxdata[tid + s] > smaxdata[tid]) {
                 smaxdata[tid] = smaxdata[tid + s];
@@ -85,14 +85,13 @@ __global__ void reduceMaxMin_Service(int *g_maxdata, int *g_mindata, int *max, i
                 smindata[tid] = smindata[tid + s];
             }
         }
-        __syncthreads();
-    }  // write result for this block to global mem
+    }
+    // write result for this block to global mem
     if (tid == 0) {
         *max = smaxdata[0];
         *min = smindata[0];
     }
 }
-
 __global__ void resetBucket(int *bucket) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     bucket[index] = 0;
@@ -112,30 +111,22 @@ __global__ void histogramKernel(int *inArray, int *outArray, int *radixArray, in
     int arrayElement;
     int i;
 
-    if (thread == 0) {
-        for (i = 0; i < RADIX; i++) {
-            outArrayShared[i] = 0;
-        }
+    if (thread < RADIX) {
+        outArrayShared[thread] = 0;
     }
-
+    __syncthreads();
     if (index < arrayLength) {
         inArrayShared[thread] = inArray[index];
-    }
 
-    __syncthreads();
-
-    if (index < arrayLength) {
         arrayElement = inArrayShared[thread] - minElement;
         radix = ((arrayElement / significantDigit) % 10);
         radixArrayShared[thread] = radix;
         atomicAdd(&outArrayShared[radix], 1);
-    }
 
-    if (index < arrayLength) {
         radixArray[index] = radixArrayShared[thread];
     }
     __syncthreads();
-    // forse possimao fare il casino che diventa supermegaultravelocissimo !!!!!!
+
     if (thread == 0) {
         for (i = 0; i < RADIX; i++) {
             outArray[blockIndex + i] += outArrayShared[i];
@@ -161,8 +152,6 @@ __global__ void combineBucket(int *blockBucketArray, int *bucketArray, int block
             bucketArrayShared[i] += bucketArrayShared[i - 1];
         }
     }
-
-    __syncthreads();
     atomicAdd(&bucketArray[index], bucketArrayShared[index]);
 }
 
@@ -202,12 +191,11 @@ void make_csv(float gflops, float time, float N) {
 
     } else {
         fp = fopen(FILE_TO_OPEN, "w");
-        fprintf(fp, "N, gflops, time_sec\n");
+        fprintf(fp, "N, BlockSize, GridSize, gflops, time_sec\n");
     }
-    fprintf(fp, "%f, %f, %.5f\n", N, gflops, time);
+    fprintf(fp, "%f, %d, %d, %f, %.5f\n", N, THREADSIZE, BLOCKSIZE, gflops, time / 1000);
     fclose(fp);
 }
-
 void radixSort(int *array, int size) {
     int significantDigit = 1;
     cudaEvent_t start, stop;
@@ -324,7 +312,7 @@ void radixSort(int *array, int size) {
 
             new_block_size = (my_size - 1) / THREADSIZE + 1;
 
-           histogramKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, blockBucketArray + (j - 1) * new_block_size * RADIX , radixArray + offset, my_size, significantDigit, min);
+            histogramKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, blockBucketArray + (j - 1) * new_block_size * RADIX, radixArray + offset, my_size, significantDigit, min);
 
             mycudaerror = cudaGetLastError();
             if (mycudaerror != cudaSuccess) {

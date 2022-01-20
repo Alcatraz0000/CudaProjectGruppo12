@@ -160,7 +160,7 @@ __global__ void combineBucket(int *blockBucketArray, int *bucketArray, int block
     }
 
     __syncthreads();
-    bucketArray[index] = bucketArrayShared[index];
+    atomicAdd(&bucketArray[index], bucketArrayShared[index]);
 }
 
 __global__ void semiSortKernel(int *inArray, int *outArray, int *indexArray, int arrayLength, int significantDigit) {
@@ -304,6 +304,7 @@ void radixSort(int *array, int size) {
 
     while (max_digit / significantDigit > 0) {
         resetBucket<<<BLOCKSIZE, RADIX>>>(blockBucketArray);
+        resetBucket<<<1, RADIX>>>(bucketArray);
         for (int j = 1; j <= MAXSM; j++) {
             if (j == 1) {
                 my_size = new_size_first;
@@ -315,7 +316,7 @@ void radixSort(int *array, int size) {
 
             new_block_size = (my_size - 1) / THREADSIZE + 1;
 
-            histogramKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, blockBucketArray, radixArray + offset, my_size, significantDigit, min);
+            histogramKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, blockBucketArray + (j - 1) * new_block_size * RADIX , radixArray + offset, my_size, significantDigit, min);
 
             mycudaerror = cudaGetLastError();
             if (mycudaerror != cudaSuccess) {
@@ -325,7 +326,7 @@ void radixSort(int *array, int size) {
 
             // calcolo la frequenza per ogni cifra, sommando quelle di tutti i block.
             // fondamentalmente sommo all'array delle frequenze il precedente, come facevamo nel vecchio algortimo. A[i-1] = A[i]
-            combineBucket<<<1, RADIX, 0, stream[j]>>>(blockBucketArray, bucketArray, new_block_size);
+            combineBucket<<<1, RADIX, 0, stream[j]>>>(blockBucketArray + (j - 1) * new_block_size * RADIX, bucketArray, new_block_size);
 
             mycudaerror = cudaGetLastError();
             if (mycudaerror != cudaSuccess) {

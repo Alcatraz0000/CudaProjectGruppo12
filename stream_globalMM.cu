@@ -142,7 +142,7 @@ __global__ void combineBucket(int *blockBucketArray, int *bucketArray, int block
     }
     __syncthreads();
     
-    bucketArray[index] = bucketArrayShared[index];
+    atomicAdd(&bucketArray[index], bucketArrayShared[index]);
 }
 
 __global__ void indexArrayKernel(int *radixArray, int *bucketArray, int *indexArray, int arrayLength, int significantDigit) {
@@ -179,7 +179,7 @@ __global__ void semiSortKernel(int *inArray, int *outArray, int *indexArray, int
 void printArray(int *array, int size) {
     int i;
     printf("[ ");
-    for (i = 0; i < size; i++)
+    for (i = 0; i < 50; i++)
         printf("%d ", array[i]);
     printf("]\n");
 }
@@ -253,7 +253,7 @@ void radixSort(int *array, int size) {
     int new_size_second = size / MAXSM;
     int my_size, offset = 0;
     int new_block_size;
-    CUDA_CHECK(cudaMalloc((void **)&bucketArrayShared, sizeof(int) * RADIX));
+    CUDA_CHECK(cudaMalloc((void **)&bucketArrayShared, sizeof(int) * RADIX * MAXSM));
 
     CUDA_CHECK(cudaMalloc((void **)&inArrayShared, sizeof(int) * size));
     CUDA_CHECK(cudaMalloc((void **)&outArrayShared, sizeof(int) * RADIX * BLOCKSIZE));
@@ -323,10 +323,10 @@ void radixSort(int *array, int size) {
             offset = new_size_second * (j - 1) + size % MAXSM;
         }
     }
-    printf("prima del while");
     while (max_digit / significantDigit > 0) {
-        printf("non fa i vwige;");
         resetBucket<<<BLOCKSIZE, RADIX>>>(blockBucketArray);
+        resetBucket<<<1, RADIX>>>(bucketArray);
+        resetBucket<<<BLOCKSIZE, THREADSIZE>>>(radixArrayShared);
         for (int j = 1; j <= MAXSM; j++) {
             if (j == 1) {
                 my_size = new_size_first;
@@ -338,18 +338,19 @@ void radixSort(int *array, int size) {
 
             new_block_size = (my_size - 1) / THREADSIZE + 1;
 
-            histogramKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, blockBucketArray, radixArray + offset, my_size, significantDigit, min, inArrayShared + offset, outArrayShared, radixArrayShared + offset);
+            histogramKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, blockBucketArray + (j - 1) * new_block_size * RADIX , radixArray + offset, my_size, significantDigit, min, inArrayShared + offset, outArrayShared, radixArrayShared + offset);
             
             mycudaerror = cudaGetLastError();
             if (mycudaerror != cudaSuccess) {
                 fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
                 exit(1);
             }
+            
 
             // calcolo la frequenza per ogni cifra, sommando quelle di tutti i block.
             // fondamentalmente sommo all'array delle frequenze il precedente, come facevamo nel vecchio algortimo. A[i-1] = A[i]
-            combineBucket<<<1, RADIX, 0, stream[j]>>>(blockBucketArray, bucketArray, new_block_size, bucketArrayShared);
-            cudaMemcpy(bucket, bucketArray, sizeof(int) * RADIX, cudaMemcpyDeviceToHost);
+            combineBucket<<<1, RADIX, 0, stream[j]>>>(blockBucketArray + (j - 1) * new_block_size * RADIX, bucketArray, new_block_size, bucketArrayShared + RADIX * (j - 1));
+            
             
             mycudaerror = cudaGetLastError();
             if (mycudaerror != cudaSuccess) {
@@ -364,7 +365,7 @@ void radixSort(int *array, int size) {
 
         cudaMemcpy(CPUradixArray, radixArray, sizeof(int) * size, cudaMemcpyDeviceToHost);
         
-        //cudaMemcpy(bucket, bucketArray, sizeof(int) * RADIX, cudaMemcpyDeviceToHost);
+        cudaMemcpy(bucket, bucketArray, sizeof(int) * RADIX, cudaMemcpyDeviceToHost);
         
         for (int c = 0; c < size; c++) {
             radix = CPUradixArray[size - c - 1];
@@ -436,7 +437,7 @@ void radixSort(int *array, int size) {
 }
 
 int main() {
-    printf("\n\nRunning Radix Sort Example in C!\n");
+    printf("\n\nRunning Radix eeSort Example in C!\n");
     printf("----------------------------------\n");
 
     int size = SIZE;
@@ -459,7 +460,7 @@ int main() {
     radixSort(array, size);
     for (int i = 1; i < size; i++)
         if (array[i - 1] > array[i]) {
-            printf("SE SCASSATT O PUNTATOR");
+            printf("SE SCASSATT O PUNTATOR, %d, %d, alla pos; %d",array[i - 1] , array[i], i);
             break;
         }
 

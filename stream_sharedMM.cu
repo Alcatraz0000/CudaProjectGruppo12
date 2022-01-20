@@ -109,26 +109,19 @@ __global__ void histogramKernel(int *inArray, int *outArray, int *radixArray, in
     int arrayElement;
     int i;
 
-    if (thread == 0) {
-        for (i = 0; i < RADIX; i++) {
-            outArrayShared[i] = 0;
-        }
+    if (thread < RADIX) {
+      outArrayShared[thread] = 0;
     }
 
     if (index < arrayLength) {
         inArrayShared[thread] = inArray[index];
-    }
-
-    __syncthreads();
-
-    if (index < arrayLength) {
+    
+  
         arrayElement = inArrayShared[thread] - minElement;
         radix = ((arrayElement / significantDigit) % 10);
         radixArrayShared[thread] = radix;
         atomicAdd(&outArrayShared[radix], 1);
-    }
 
-    if (index < arrayLength) {
         radixArray[index] = radixArrayShared[thread];
     }
     __syncthreads();
@@ -348,7 +341,7 @@ void radixSort(int *array, int size) {
         }
         cudaMemcpy(indexArray, CPUindexArray, sizeof(int) * size, cudaMemcpyHostToDevice);
 
-        cudaThreadSynchronize();
+        
 
         mycudaerror = cudaGetLastError();
         if (mycudaerror != cudaSuccess) {

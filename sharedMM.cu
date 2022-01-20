@@ -20,7 +20,8 @@
 #define THREADSIZE 64
 #define BLOCKSIZE ((SIZE - 1) / THREADSIZE + 1)
 #define RADIX 10
-#define FILE_TO_OPEN "OURLASTCODE_shared_measures.csv"
+#define MAX_DIGIT 9999
+#define FILE_TO_OPEN "THREADS_512-SIZE_14155776-MAX-DIGIT_9999-shared_measures.csv"
 
 __global__ void copyKernel(int *inArray, int *semiSortArray, int arrayLength) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -249,7 +250,7 @@ void radixSort(int *array, int size) {
 
     cudaMemcpy(inputArray, array, sizeof(int) * size, cudaMemcpyHostToDevice);
 
-    int max_digit;
+    int max_digit_value;
     cudaMalloc((void **)&largestNum, sizeof(int));
     cudaMalloc((void **)&smallestNum, sizeof(int));
 
@@ -275,8 +276,8 @@ void radixSort(int *array, int size) {
     cudaMemcpy(&max, largestNum, sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(&min, smallestNum, sizeof(int), cudaMemcpyDeviceToHost);
 
-    max_digit = max - min;
-    while (max_digit / significantDigit > 0) {
+    max_digit_value = max - min;
+    while (max_digit_value / significantDigit > 0) {
         int bucket[RADIX] = {0};
         cudaMemcpy(bucketArray, bucket, sizeof(int) * RADIX, cudaMemcpyHostToDevice);
         // calcolo frequenza per ogni cifra, questo nel mio blocco.
@@ -352,14 +353,13 @@ int main() {
     int size = SIZE;
     int *array = (int *)malloc(size * sizeof(int));
     int i;
-    int max_digit = 9999;
     srand(time(NULL));
 
     for (i = 0; i < size; i++) {
         if (i % 2)
-            array[i] = -(rand() % max_digit);
+            array[i] = -(rand() % MAX_DIGIT);
         else
-            array[i] = (rand() % max_digit);
+            array[i] = (rand() % MAX_DIGIT);
     }
 
     // printf("\nUnsorted List: ");

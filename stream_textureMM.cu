@@ -16,13 +16,14 @@
         }                                                                 \
     }
 
-#define SIZE 8192 * 12 * 12 * 12
+#define SIZE 14155776
 #define THREADSIZE 512
 #define BLOCKSIZE ((SIZE - 1) / THREADSIZE + 1)
 #define RADIX 10
 #define MAXSM 12
 #define BLOCKxSM (2048 / THREADSIZE)
-#define FILE_TO_OPEN "OURLASTCODE_shared_measures.csv"
+#define MAX_DIGIT 9999
+#define FILE_TO_OPEN "STEAMS_THREADS_512-SIZE_14155776-MAX-DIGIT_9999-texture_measures.csv"
 
 texture<int, 1> texture_semiSortArray;  // donotremove
 __device__ float fetch_radixArrayElement(int value) {
@@ -412,17 +413,15 @@ int main() {
     printf("----------------------------------\n");
 
     int size = SIZE;
-    int *array;
-    cudaMallocHost((void **)&array, size * sizeof(int));
+    int *array = (int *)malloc(size * sizeof(int));
     int i;
-    int max_digit = 9999;
     srand(time(NULL));
 
     for (i = 0; i < size; i++) {
         if (i % 2)
-            array[i] = -(rand() % max_digit);
+            array[i] = -(rand() % MAX_DIGIT);
         else
-            array[i] = (rand() % max_digit);
+            array[i] = (rand() % MAX_DIGIT);
     }
 
     // printf("\nUnsorted List: ");
@@ -430,10 +429,8 @@ int main() {
 
     radixSort(array, size);
     for (int i = 1; i < size; i++)
-        if (array[i - 1] > array[i]) {
+        if (array[i - 1] > array[i])
             printf("SE SCASSATT O PUNTATOR");
-            break;
-        }
 
     // printf("\nSorted List:");
     // printArray(array, size);

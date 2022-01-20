@@ -16,14 +16,14 @@
         }                                                                 \
     }
 
-#define SIZE 8192 * 12 * 12 * 12
+#define SIZE 14155776
 #define THREADSIZE 512
 #define BLOCKSIZE ((SIZE - 1) / THREADSIZE + 1)
 #define RADIX 10
 #define MAXSM 12
 #define BLOCKxSM (2048 / THREADSIZE)
-#define FILE_TO_OPEN "OURLASTCODE_shared_measures.csv"
-
+#define MAX_DIGIT 9999
+#define FILE_TO_OPEN "STEAMS_THREADS_512-SIZE_14155776-MAX-DIGIT_9999-shared_measures.csv"
 __global__ void copyKernel(int *inArray, int *semiSortArray, int arrayLength) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -209,7 +209,7 @@ void radixSort(int *array, int size) {
     threadCount = THREADSIZE;
     blockCount = BLOCKSIZE;
 
-    int max_digit;
+    int max_digit_value;
 
     int *outputArray;
     int *inputArray;
@@ -274,9 +274,9 @@ void radixSort(int *array, int size) {
     int *CPUradixArray = (int *)malloc(size * sizeof(int));
     int *CPUindexArray = (int *)malloc(size * sizeof(int));
 
-    max_digit = max - min;
+    max_digit_value = max - min;
 
-    while (max_digit / significantDigit > 0) {
+    while (max_digit_value / significantDigit > 0) {
         resetBucket<<<BLOCKSIZE, RADIX>>>(blockBucketArray);
         resetBucket<<<1, RADIX>>>(bucketArray);
         for (int j = 1; j <= MAXSM; j++) {
@@ -375,17 +375,15 @@ int main() {
     printf("----------------------------------\n");
 
     int size = SIZE;
-    int *array;
-    cudaMallocHost((void **)&array, size * sizeof(int));
+    int *array = (int *)malloc(size * sizeof(int));
     int i;
-    int max_digit = 9999;
     srand(time(NULL));
 
     for (i = 0; i < size; i++) {
         if (i % 2)
-            array[i] = -(rand() % max_digit);
+            array[i] = -(rand() % MAX_DIGIT);
         else
-            array[i] = (rand() % max_digit);
+            array[i] = (rand() % MAX_DIGIT);
     }
 
     // printf("\nUnsorted List: ");
@@ -393,13 +391,11 @@ int main() {
 
     radixSort(array, size);
     for (int i = 1; i < size; i++)
-        if (array[i - 1] > array[i]) {
+        if (array[i - 1] > array[i])
             printf("SE SCASSATT O PUNTATOR");
-            break;
-        }
 
-    printf("\nSorted List:");
-    printArray(array, size);
+    // printf("\nSorted List:");
+    // printArray(array, size);
 
     printf("\n");
 

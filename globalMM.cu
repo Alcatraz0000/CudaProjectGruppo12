@@ -20,7 +20,8 @@
 #define THREADSIZE 64
 #define BLOCKSIZE ((SIZE - 1) / THREADSIZE + 1)
 #define RADIX 10
-#define FILE_TO_OPEN "OURLASTCODE_shared_measures.csv"
+#define MAX_DIGIT 9999
+#define FILE_TO_OPEN "THREADS_512-SIZE_14155776-MAX-DIGIT_9999-global_measures.csv"
 
 __global__ void copyKernel(int *inArray, int *semiSortArray, int arrayLength) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -361,14 +362,13 @@ int main() {
     int size = SIZE;
     int *array = (int *)malloc(size * sizeof(int));
     int i;
-    int max_digit = 9999;
     srand(time(NULL));
 
     for (i = 0; i < size; i++) {
         if (i % 2)
-            array[i] = -(rand() % max_digit);
+            array[i] = -(rand() % MAX_DIGIT);
         else
-            array[i] = (rand() % max_digit);
+            array[i] = (rand() % MAX_DIGIT);
     }
 
     // printf("\nUnsorted List: ");

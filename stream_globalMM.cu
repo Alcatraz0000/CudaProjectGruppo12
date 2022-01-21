@@ -28,6 +28,10 @@
 #define MAX_DIGIT 9999
 #endif
 
+#ifndef GIPS
+#define GIPS 0
+#endif
+
 #define GRIDSIZE ((SIZE - 1) / BLOCKSIZE + 1)
 #define RADIX 10
 #define MAXSM 12
@@ -386,8 +390,8 @@ void radixSort(int *array, int size) {
     cudaEventSynchronize(stop);
     float transferTime;
     cudaEventElapsedTime(&transferTime, start, stop);
-    printf("CUDA Time = %.5f ms dim=%d\n", transferTime, size);
-    make_csv(0, transferTime, size);
+    printf("CUDA Time = %.5f ms GIPS = %.5f MAX_DIGIT = %d BLOCKSIZE = %d dim=%d\n", transferTime, GIPS, MAX_DIGIT, BLOCKSIZE, size);
+    make_csv(transferTime, size);
     cudaMemcpy(array, inputArray, sizeof(int) * size, cudaMemcpyDeviceToHost);
 
     cudaFree(inputArray);

@@ -28,6 +28,10 @@
 #define MAX_DIGIT 9999
 #endif
 
+#ifndef GIPS
+#define GIPS 0
+#endif
+
 #define GRIDSIZE ((SIZE - 1) / BLOCKSIZE + 1)
 #define RADIX 10
 #define FILE_TO_OPEN "Global_measures.csv"
@@ -199,16 +203,16 @@ int findLargestNum(int *array, int size) {
     return largestNum;
 }
 
-void make_csv(float gflops, float time, float N) {
+void make_csv(float time, float N) {
     FILE *fp;
     if (access(FILE_TO_OPEN, F_OK) == 0) {
         fp = fopen(FILE_TO_OPEN, "a");
 
     } else {
         fp = fopen(FILE_TO_OPEN, "w");
-        fprintf(fp, "N, GRIDSIZE, GridSize, gflops, time_sec\n");
+        fprintf(fp, "N, BLOCKSIZE, GRIDSIZE, MAX_DIGIT, GIPS, TIME_SEC\n");
     }
-    fprintf(fp, "%f, %d, %d, %f, %.5f\n", N, BLOCKSIZE, GRIDSIZE, gflops, time / 1000);
+    fprintf(fp, "%f, %d, %d, %d, %f, %.5f\n", N, BLOCKSIZE, GRIDSIZE, MAX_DIGIT, GIPS / (time / 1000), time / 1000);
     fclose(fp);
 }
 

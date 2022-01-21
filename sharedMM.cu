@@ -345,7 +345,7 @@ void radixSort(int *array, int size) {
     float transferTime;
     cudaEventElapsedTime(&transferTime, start, stop);
     printf("CUDA Time = %.5f ms dim=%d\n", transferTime, size);
-    make_csv(0, transferTime, size);
+    make_csv(transferTime, size);
     cudaMemcpy(array, inputArray, sizeof(int) * size, cudaMemcpyDeviceToHost);
 
     cudaFree(inputArray);

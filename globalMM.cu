@@ -20,15 +20,15 @@
 #define SIZE 8192 * 12
 #endif
 
-#ifndef THREADSIZE
-#define THREADSIZE 1024
+#ifndef BLOCKSIZE
+#define BLOCKSIZE 1024
 #endif
 
 #ifndef MAX_DIGIT
 #define MAX_DIGIT 9999
 #endif
 
-#define BLOCKSIZE ((SIZE - 1) / THREADSIZE + 1)
+#define GRIDSIZE ((SIZE - 1) / BLOCKSIZE + 1)
 #define RADIX 10
 #define FILE_TO_OPEN "Global_measures.csv"
 
@@ -66,8 +66,8 @@ __global__ void reduceMaxMin_Service(int *g_maxdata, int *g_mindata, int *max, i
     int tid = threadIdx.x;
     smaxdata[tid] = g_maxdata[tid];
     smindata[tid] = g_mindata[tid];
-    for (unsigned int s = 1; s < BLOCKSIZE / THREADSIZE; s++) {
-        int index = THREADSIZE * s + tid;
+    for (unsigned int s = 1; s < GRIDSIZE / BLOCKSIZE; s++) {
+        int index = BLOCKSIZE * s + tid;
         if (smaxdata[tid] < g_maxdata[index])
             smaxdata[tid] = g_maxdata[index];
         if (smindata[tid] > g_mindata[index])
@@ -138,7 +138,7 @@ __global__ void combineBucket(int *blockBucketArray, int *bucketArray, int *buck
 
     bucketArrayShared[index] = 0;
 
-    for (i = index; i < RADIX * BLOCKSIZE; i = i + RADIX) {
+    for (i = index; i < RADIX * GRIDSIZE; i = i + RADIX) {
         atomicAdd(&bucketArrayShared[index], blockBucketArray[i]);
     }
     __syncthreads();
@@ -206,9 +206,9 @@ void make_csv(float gflops, float time, float N) {
 
     } else {
         fp = fopen(FILE_TO_OPEN, "w");
-        fprintf(fp, "N, BlockSize, GridSize, gflops, time_sec\n");
+        fprintf(fp, "N, GRIDSIZE, GridSize, gflops, time_sec\n");
     }
-    fprintf(fp, "%f, %d, %d, %f, %.5f\n", N, THREADSIZE, BLOCKSIZE, gflops, time / 1000);
+    fprintf(fp, "%f, %d, %d, %f, %.5f\n", N, BLOCKSIZE, GRIDSIZE, gflops, time / 1000);
     fclose(fp);
 }
 
@@ -220,8 +220,8 @@ void radixSort(int *array, int size) {
 
     int min, max;
 
-    threadCount = THREADSIZE;
-    blockCount = BLOCKSIZE;
+    threadCount = BLOCKSIZE;
+    blockCount = GRIDSIZE;
 
     int *outputArray;
     int *inputArray;
@@ -245,9 +245,9 @@ void radixSort(int *array, int size) {
 
     CUDA_CHECK(cudaMalloc((void **)&bucketArrayShared, sizeof(int) * RADIX));
 
-    CUDA_CHECK(cudaMalloc((void **)&inArrayShared, sizeof(int) * THREADSIZE));
+    CUDA_CHECK(cudaMalloc((void **)&inArrayShared, sizeof(int) * BLOCKSIZE));
     CUDA_CHECK(cudaMalloc((void **)&outArrayShared, sizeof(int) * RADIX));
-    CUDA_CHECK(cudaMalloc((void **)&radixArrayShared, sizeof(int) * THREADSIZE));
+    CUDA_CHECK(cudaMalloc((void **)&radixArrayShared, sizeof(int) * BLOCKSIZE));
 
     CUDA_CHECK(cudaMalloc((void **)&inputArray, sizeof(int) * size));
     CUDA_CHECK(cudaMalloc((void **)&indexArray, sizeof(int) * size));
@@ -255,8 +255,8 @@ void radixSort(int *array, int size) {
     CUDA_CHECK(cudaMalloc((void **)&smaxdata, sizeof(int) * size));
     CUDA_CHECK(cudaMalloc((void **)&smindata, sizeof(int) * size));
 
-    CUDA_CHECK(cudaMalloc((void **)&g_maxdata, sizeof(int) * BLOCKSIZE));
-    CUDA_CHECK(cudaMalloc((void **)&g_mindata, sizeof(int) * BLOCKSIZE));
+    CUDA_CHECK(cudaMalloc((void **)&g_maxdata, sizeof(int) * GRIDSIZE));
+    CUDA_CHECK(cudaMalloc((void **)&g_mindata, sizeof(int) * GRIDSIZE));
 
     CUDA_CHECK(cudaMalloc((void **)&radixArray, sizeof(int) * size));
 
@@ -264,7 +264,7 @@ void radixSort(int *array, int size) {
 
     CUDA_CHECK(cudaMalloc((void **)&semiSortArray, sizeof(int) * size));
     CUDA_CHECK(cudaMalloc((void **)&bucketArray, sizeof(int) * RADIX));
-    CUDA_CHECK(cudaMalloc((void **)&blockBucketArray, sizeof(int) * RADIX * BLOCKSIZE));
+    CUDA_CHECK(cudaMalloc((void **)&blockBucketArray, sizeof(int) * RADIX * GRIDSIZE));
 
     cudaMemcpy(inputArray, array, sizeof(int) * size, cudaMemcpyHostToDevice);
 
@@ -284,7 +284,7 @@ void radixSort(int *array, int size) {
         fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
         exit(1);
     }
-    reduceMaxMin_Service<<<1, THREADSIZE>>>(g_maxdata, g_mindata, largestNum, smallestNum, smaxdata, smindata);
+    reduceMaxMin_Service<<<1, BLOCKSIZE>>>(g_maxdata, g_mindata, largestNum, smallestNum, smaxdata, smindata);
     mycudaerror = cudaGetLastError();
     if (mycudaerror != cudaSuccess) {
         fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));

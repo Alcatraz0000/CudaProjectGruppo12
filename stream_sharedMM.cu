@@ -28,11 +28,14 @@
 #define MAX_DIGIT 9999
 #endif
 
+#ifndef GIPS
+#define GIPS 0
+#endif
+
 #define GRIDSIZE ((SIZE - 1) / BLOCKSIZE + 1)
 #define RADIX 10
 #define MAXSM 12
-#define BLOCKxSM (2048 / BLOCKSIZE)
-#define FILE_TO_OPEN "STEAMS_Shared_measure.csv"
+#define FILE_TO_OPEN "new_STEAMS_Shared_measure.csv"
 
 __global__ void copyKernel(int *inArray, int *semiSortArray, int arrayLength) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -50,7 +53,7 @@ __global__ void reduceMaxMin(int *g_idata, int *g_maxdata, int *g_mindata) {
     smaxdata[tid] = g_idata[i];
     smindata[tid] = g_idata[i];
     __syncthreads();  // do reduction in shared mem
-    for (unsigned int s = blockDim.x / BLOCKxSM; s > 0; s >>= 1) {
+    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
         if (tid < s) {
             if (smaxdata[tid + s] > smaxdata[tid]) {
                 smaxdata[tid] = smaxdata[tid + s];
@@ -82,7 +85,7 @@ __global__ void reduceMaxMin_Service(int *g_maxdata, int *g_mindata, int *max, i
             smindata[tid] = g_mindata[index];
     }
     __syncthreads();  // do reduction in shared mem
-    for (unsigned int s = blockDim.x / BLOCKxSM; s > 0; s >>= 1) {
+    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
         if (tid < s) {
             if (smaxdata[tid + s] > smaxdata[tid]) {
                 smaxdata[tid] = smaxdata[tid + s];
@@ -370,8 +373,8 @@ void radixSort(int *array, int size) {
     cudaEventSynchronize(stop);
     float transferTime;
     cudaEventElapsedTime(&transferTime, start, stop);
-    printf("CUDA Time = %.5f ms dim=%d\n", transferTime, size);
-    make_csv(0, transferTime, size);
+    printf("CUDA Time = %.5f ms GIPS = %.5f MAX_DIGIT = %d BLOCKSIZE = %d dim=%d\n", transferTime, GIPS, MAX_DIGIT, BLOCKSIZE, size);
+    make_csv(transferTime, size);
     cudaMemcpy(array, inputArray, sizeof(int) * size, cudaMemcpyDeviceToHost);
 
     cudaFree(inputArray);

@@ -16,14 +16,24 @@
         }                                                                 \
     }
 
-#define SIZE 14155776
-#define THREADSIZE 512
+#ifndef SIZE
+#define SIZE 8192 * 12 * 12
+#endif
+
+#ifndef THREADSIZE
+#define THREADSIZE 256
+#endif
+
+#ifndef MAX_DIGIT
+#define MAX_DIGIT 9999
+#endif
+
 #define BLOCKSIZE ((SIZE - 1) / THREADSIZE + 1)
 #define RADIX 10
 #define MAXSM 12
 #define BLOCKxSM (2048 / THREADSIZE)
-#define MAX_DIGIT 9999
-#define FILE_TO_OPEN "STEAMS_THREADS_512-SIZE_14155776-MAX-DIGIT_9999-shared_measures.csv"
+#define FILE_TO_OPEN "STEAMS_Shared_measure.csv"
+
 __global__ void copyKernel(int *inArray, int *semiSortArray, int arrayLength) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -310,13 +320,14 @@ void radixSort(int *array, int size) {
 
         cudaMemcpy(CPUradixArray, radixArray, sizeof(int) * size, cudaMemcpyDeviceToHost);
         cudaMemcpy(bucket, bucketArray, sizeof(int) * RADIX, cudaMemcpyDeviceToHost);
-
         for (int c = 0; c < size; c++) {
             radix = CPUradixArray[size - c - 1];
             pocket = --bucket[radix];
             CPUindexArray[size - c - 1] = pocket;
         }
         cudaMemcpy(indexArray, CPUindexArray, sizeof(int) * size, cudaMemcpyHostToDevice);
+
+        cudaThreadSynchronize();
 
         mycudaerror = cudaGetLastError();
         if (mycudaerror != cudaSuccess) {
@@ -336,6 +347,7 @@ void radixSort(int *array, int size) {
                 exit(1);
             }
         }
+        cudaThreadSynchronize();
         for (int j = 1; j <= MAXSM; j++) {
             my_size = new_size_first;
             offset = new_size_first * (j - 1);
@@ -391,8 +403,10 @@ int main() {
 
     radixSort(array, size);
     for (int i = 1; i < size; i++)
-        if (array[i - 1] > array[i])
+        if (array[i - 1] > array[i]) {
             printf("SE SCASSATT O PUNTATOR");
+            break;
+        }
 
     // printf("\nSorted List:");
     // printArray(array, size);

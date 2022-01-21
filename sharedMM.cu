@@ -16,12 +16,21 @@
         }                                                                 \
     }
 
-#define SIZE 8192
-#define THREADSIZE 64
+#ifndef SIZE
+#define SIZE 14155776
+#endif
+
+#ifndef THREADSIZE
+#define THREADSIZE 1024
+#endif
+
+#ifndef MAX_DIGIT
+#define MAX_DIGIT 9999
+#endif
+
 #define BLOCKSIZE ((SIZE - 1) / THREADSIZE + 1)
 #define RADIX 10
-#define MAX_DIGIT 9999
-#define FILE_TO_OPEN "THREADS_512-SIZE_14155776-MAX-DIGIT_9999-shared_measures.csv"
+#define FILE_TO_OPEN "Shared_measures.csv"
 
 __global__ void copyKernel(int *inArray, int *semiSortArray, int arrayLength) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;

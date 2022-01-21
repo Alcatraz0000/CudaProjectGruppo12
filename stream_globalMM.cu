@@ -16,13 +16,22 @@
         }                                                                 \
     }
 
+#ifndef SIZE
 #define SIZE 14155776
+#endif
+
+#ifndef THREADSIZE
 #define THREADSIZE 1024
+#endif
+
+#ifndef MAX_DIGIT
+#define MAX_DIGIT 9999
+#endif
+
 #define BLOCKSIZE ((SIZE - 1) / THREADSIZE + 1)
 #define RADIX 10
 #define MAXSM 12
-#define MAX_DIGIT 9999
-#define FILE_TO_OPEN "STEAMS_THREADS_1024-SIZE_14155776-MAX-DIGIT_9999-global_measures.csv"
+#define FILE_TO_OPEN "STEAMS_Global_measure.csv"
 
 __global__ void copyKernel(int *inArray, int *semiSortArray, int arrayLength) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -46,7 +55,6 @@ __global__ void reduceMaxMin(int *g_idata, int *g_maxdata, int *g_mindata, int *
                 smindata[i] = smindata[i + s];
             }
         }
-        __syncthreads();
     }  // write result for this block to global mem
 
     if (threadIdx.x == 0) {
@@ -76,7 +84,6 @@ __global__ void reduceMaxMin_Service(int *g_maxdata, int *g_mindata, int *max, i
                 smindata[tid] = smindata[tid + s];
             }
         }
-        __syncthreads();
     }  // write result for this block to global mem
     if (tid == 0) {
         *max = smaxdata[0];
@@ -144,24 +151,6 @@ __global__ void combineBucket(int *blockBucketArray, int *bucketArray, int block
     __syncthreads();
 
     atomicAdd(&bucketArray[index], bucketArrayShared[index]);
-}
-
-__global__ void indexArrayKernel(int *radixArray, int *bucketArray, int *indexArray, int arrayLength, int significantDigit) {
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-
-    int i;
-    int radix;
-    int pocket;
-
-    if (index < RADIX) {
-        for (i = 0; i < arrayLength; i++) {
-            radix = radixArray[arrayLength - i - 1];
-            if (radix == index) {
-                pocket = --bucketArray[radix];
-                indexArray[arrayLength - i - 1] = pocket;
-            }
-        }
-    }
 }
 
 __global__ void semiSortKernel(int *inArray, int *outArray, int *indexArray, int arrayLength, int significantDigit) {

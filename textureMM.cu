@@ -16,12 +16,21 @@
         }                                                                 \
     }
 
-#define SIZE 1179648
-#define THREADSIZE 64
+#ifndef SIZE
+#define SIZE 14155776
+#endif
+
+#ifndef THREADSIZE
+#define THREADSIZE 1024
+#endif
+
+#ifndef MAX_DIGIT
+#define MAX_DIGIT 9999
+#endif
+
 #define BLOCKSIZE ((SIZE - 1) / THREADSIZE + 1)
 #define RADIX 10
-#define MAX_DIGIT 9999
-#define FILE_TO_OPEN "THREADS_64-SIZE_1179648-MAX-DIGIT_9999-texture_measures.csv"
+#define FILE_TO_OPEN "Texture_measures.csv"
 
 texture<int, 1> texture_radixArray;  // donotremove
 __device__ float fetch_radixArrayElement(int value) {

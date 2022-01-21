@@ -16,14 +16,23 @@
         }                                                                 \
     }
 
-#define SIZE 14155776
-#define THREADSIZE 512
+#ifndef SIZE
+#define SIZE 8192 * 12 * 12
+#endif
+
+#ifndef THREADSIZE
+#define THREADSIZE 256
+#endif
+
+#ifndef MAX_DIGIT
+#define MAX_DIGIT 9999
+#endif
+
 #define BLOCKSIZE ((SIZE - 1) / THREADSIZE + 1)
 #define RADIX 10
 #define MAXSM 12
 #define BLOCKxSM (2048 / THREADSIZE)
-#define MAX_DIGIT 9999
-#define FILE_TO_OPEN "STEAMS_THREADS_512-SIZE_14155776-MAX-DIGIT_9999-texture_measures.csv"
+#define FILE_TO_OPEN "STEAMS_Texture_measure.csv"
 
 texture<int, 1> texture_semiSortArray;  // donotremove
 __device__ float fetch_radixArrayElement(int value) {
@@ -213,7 +222,7 @@ void radixSort(int *array, int size) {
     threadCount = THREADSIZE;
     blockCount = BLOCKSIZE;
 
-    int max_digit;
+    int max_digit_value;
 
     int *outputArray;
     int *inputArray;
@@ -227,8 +236,7 @@ void radixSort(int *array, int size) {
     int *largestNum;
     int *smallestNum;
 
-    int new_size_first = size / MAXSM + size % MAXSM;
-    int new_size_second = size / MAXSM;
+    int new_size_first = size / MAXSM;
     int my_size, offset = 0;
     int new_block_size;
 
@@ -250,12 +258,7 @@ void radixSort(int *array, int size) {
     cudaMalloc((void **)&smallestNum, sizeof(int));
 
     for (int j = 1; j <= MAXSM; j++) {
-        if (j == 1) {
-            cudaMemcpyAsync(inputArray, array, new_size_first * sizeof(int), cudaMemcpyHostToDevice, stream[j]);
-
-        } else {
-            cudaMemcpyAsync(inputArray + new_size_second * (j - 1) + size % MAXSM, array + new_size_second * (j - 1) + size % MAXSM, new_size_second * sizeof(int), cudaMemcpyHostToDevice, stream[j]);
-        }
+        cudaMemcpyAsync(inputArray + new_size_first * (j - 1) + size % MAXSM, array + new_size_first * (j - 1) + size % MAXSM, new_size_first * sizeof(int), cudaMemcpyHostToDevice, stream[j]);
     }
 
     cudaError_t mycudaerror;
@@ -288,28 +291,13 @@ void radixSort(int *array, int size) {
     int *CPUradixArray = (int *)malloc(size * sizeof(int));
     int *CPUindexArray = (int *)malloc(size * sizeof(int));
 
-    max_digit = max - min;
-    for (int j = 1; j <= MAXSM; j++) {
-        if (j == 1) {
-            my_size = new_size_first;
-            offset = 0;
-        } else {
-            my_size = new_size_second;
-            offset = new_size_second * (j - 1) + size % MAXSM;
-        }
-    }
-
-    while (max_digit / significantDigit > 0) {
+    max_digit_value = max - min;
+    while (max_digit_value / significantDigit > 0) {
         resetBucket<<<BLOCKSIZE, RADIX>>>(blockBucketArray);
         resetBucket<<<1, RADIX>>>(bucketArray);
         for (int j = 1; j <= MAXSM; j++) {
-            if (j == 1) {
-                my_size = new_size_first;
-                offset = 0;
-            } else {
-                my_size = new_size_second;
-                offset = new_size_second * (j - 1) + size % MAXSM;
-            }
+            my_size = new_size_first;
+            offset = new_size_first * (j - 1);
 
             new_block_size = (my_size - 1) / THREADSIZE + 1;
 
@@ -353,13 +341,9 @@ void radixSort(int *array, int size) {
             exit(1);
         }
         for (int j = 1; j <= MAXSM; j++) {
-            if (j == 1) {
-                my_size = new_size_first;
-                offset = 0;
-            } else {
-                my_size = new_size_second;
-                offset = new_size_second * (j - 1) + size % MAXSM;
-            }
+            my_size = new_size_first;
+            offset = new_size_first * (j - 1);
+
             new_block_size = (my_size - 1) / THREADSIZE + 1;
             // salva gli elementi nella corretta posizione ordinati.
             semiSortKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, semiSortArray, indexArray + offset, my_size, significantDigit);
@@ -371,13 +355,9 @@ void radixSort(int *array, int size) {
         }
         cudaThreadSynchronize();
         for (int j = 1; j <= MAXSM; j++) {
-            if (j == 1) {
-                my_size = new_size_first;
-                offset = 0;
-            } else {
-                my_size = new_size_second;
-                offset = new_size_second * (j - 1) + size % MAXSM;
-            }
+            my_size = new_size_first;
+            offset = new_size_first * (j - 1);
+
             new_block_size = (my_size - 1) / THREADSIZE + 1;
             copyKernel<<<new_block_size, THREADSIZE, 0, stream[j]>>>(inputArray + offset, offset, my_size);
 

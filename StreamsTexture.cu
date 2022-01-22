@@ -41,11 +41,18 @@
 #define MAXSM 12
 #define FILE_TO_OPEN "Streams_Texture_measure.csv"
 
-texture<int, 1> texture_semiSortArray;  // donotremove
+texture<int, 1> texture_semiSortArray;
+/**
+ * This device function is used to retrive values from the array
+ * saved in the texture memory
+ * */
 __device__ float fetch_radixArrayElement(int value) {
     return tex1Dfetch(texture_semiSortArray, value);
 }
-
+/**
+ *  This kernel will be launched on GRIDSIZE * BLOCKSIZE threads, in order to copy the values of the semiSortArray in inArray
+ *
+ * **/
 __global__ void copyKernel(int *inArray, int offsette, int arrayLength) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -53,7 +60,10 @@ __global__ void copyKernel(int *inArray, int offsette, int arrayLength) {
         inArray[index] = fetch_radixArrayElement(index + offsette);
     }
 }
-
+/**
+ * This kernel will be launched on GRIDSIZE * BLOCKSIZE threads, so that each thread will calculate its local maximum and minimum value
+ *
+ * */
 __global__ void reduceMaxMin(int *g_idata, int *g_maxdata, int *g_mindata) {
     __shared__ int smaxdata[(SIZE / GRIDSIZE)];  // each thread loads one element from global to shared mem unsigned
     __shared__ int smindata[(SIZE / GRIDSIZE)];  // each thread loads one element from global to shared mem unsigned
@@ -79,6 +89,10 @@ __global__ void reduceMaxMin(int *g_idata, int *g_maxdata, int *g_mindata) {
         g_mindata[blockIdx.x] = smindata[0];
     }
 }
+/**
+ * This kernel will be launched on 1 * BLOCKSIZE threads, so that a global
+ * maximum and minimum value shared between all blocks will be calcualted
+ * */
 __global__ void reduceMaxMin_Service(int *g_maxdata, int *g_mindata, int *max, int *min) {
     __shared__ int smaxdata[(BLOCKSIZE)];  // each thread loads one element from global to shared mem unsigned
     __shared__ int smindata[(BLOCKSIZE)];
@@ -109,11 +123,17 @@ __global__ void reduceMaxMin_Service(int *g_maxdata, int *g_mindata, int *max, i
         *min = smindata[0];
     }
 }
+/**
+ * This kernel will be launched on on numbers of threads that depends on the length of the array
+ * */
 __global__ void resetBucket(int *bucket) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     bucket[index] = 0;
 }
-
+/**
+ * This kernel will be launched on GRIDSIZE * BLOCKSIZE threads, so that each thread for
+ * the specific significant digit of the assigned value will increase the frequencies of the digit
+ * */
 __global__ void histogramKernel(int *inArray, int *outArray, int *radixArray, int arrayLength, int significantDigit, int minElement) {
     __shared__ int inArrayShared[BLOCKSIZE];
     __shared__ int outArrayShared[RADIX];
@@ -150,7 +170,11 @@ __global__ void histogramKernel(int *inArray, int *outArray, int *radixArray, in
         }
     }
 }
-
+/**
+ * This kernel will be launched on 1 * RADIX threads, so that the array containing the frequencies
+ * for each block is addictioned to that of the other blocks.
+ * Then the value in each position of the resulting array is addictioned with the value in the previus one position.
+ * */
 __global__ void combineBucket(int *blockBucketArray, int *bucketArray, int block_size) {
     __shared__ int bucketArrayShared[RADIX];
 
@@ -171,7 +195,10 @@ __global__ void combineBucket(int *blockBucketArray, int *bucketArray, int block
     }
     atomicAdd(&bucketArray[index], bucketArrayShared[index]);
 }
-
+/**
+ * This kernel will be launched on GRIDSIZE * BLOCKSIZE, so that a sorting
+ * for the specific significantDigit between the numbers is made
+ * */
 __global__ void semiSortKernel(int *inArray, int *outArray, int *indexArray, int arrayLength, int significantDigit) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -183,7 +210,9 @@ __global__ void semiSortKernel(int *inArray, int *outArray, int *indexArray, int
         outArray[arrayIndex] = arrayElement;
     }
 }
-
+/**
+ * Print all the array
+ * */
 void printArray(int *array, int size) {
     int i;
     printf("[ ");
@@ -192,15 +221,9 @@ void printArray(int *array, int size) {
     printf("]\n");
 }
 
-int findLargestNum(int *array, int size) {
-    int i;
-    int largestNum = -1;
-    for (i = 0; i < size; i++) {
-        if (array[i] > largestNum)
-            largestNum = array[i];
-    }
-    return largestNum;
-}
+/**
+ * This functions makes the csv file with all the information needed
+ * */
 void make_csv(float time, float N) {
     FILE *fp;
     if (access(FILE_TO_OPEN, F_OK) == 0) {
@@ -213,7 +236,9 @@ void make_csv(float time, float N) {
     fprintf(fp, "%f, %d, %d, %d, %f, %.5f\n", N, BLOCKSIZE, GRIDSIZE, MAX_DIGIT, GIPS / (time / 1000), time / 1000);
     fclose(fp);
 }
-
+/**
+ * This functions test if the array is correctly sorted.
+ * */
 void TESTArray(int *array, int size) {
     for (int i = 1; i < size; i++)
         if (array[i - 1] > array[i]) {
@@ -222,7 +247,10 @@ void TESTArray(int *array, int size) {
         }
     printf("Ordinamento Corretto");
 }
-
+/**
+ * This functions allocates all the resurces and launches all the kernel necessary
+ * to sort the array
+ * */
 void radixSort(int *array, int size) {
     int significantDigit = 1;
     cudaEvent_t start, stop;
@@ -280,6 +308,7 @@ void radixSort(int *array, int size) {
 
     cudaError_t mycudaerror;
     mycudaerror = cudaGetLastError();
+    // Create the channel between global and texture memory and bind them.
     cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<int>();
     mycudaerror = cudaBindTexture(0, texture_semiSortArray, semiSortArray, channelDesc);
     if (mycudaerror != cudaSuccess) printf("can not bind semiSortArray to texture \n");
@@ -308,7 +337,9 @@ void radixSort(int *array, int size) {
     int *CPUradixArray = (int *)malloc(size * sizeof(int));
     int *CPUindexArray = (int *)malloc(size * sizeof(int));
 
+    // We add minimum number of the array with the maximum one in order to support also the sorting of the negative numbers
     max_digit_value = max - min;
+    // We iterate on the number of digit contained in the max_digit_value
     while (max_digit_value / significantDigit > 0) {
         resetBucket<<<GRIDSIZE, RADIX>>>(blockBucketArray);
         resetBucket<<<1, RADIX>>>(bucketArray);
@@ -326,8 +357,6 @@ void radixSort(int *array, int size) {
                 exit(1);
             }
 
-            // calcolo la frequenza per ogni cifra, sommando quelle di tutti i block.
-            // fondamentalmente sommo all'array delle frequenze il precedente, come facevamo nel vecchio algortimo. A[i-1] = A[i]
             combineBucket<<<1, RADIX, 0, stream[j]>>>(blockBucketArray + (j - 1) * new_block_size * RADIX, bucketArray, new_block_size);
 
             mycudaerror = cudaGetLastError();
@@ -336,11 +365,7 @@ void radixSort(int *array, int size) {
                 exit(1);
             }
         }
-
-        // reduce bucketArray
-
-        // salva gli indici in cui memorizzare gli elementi ordinati --> fa la magia :D
-
+        // This sections is dedicated to estabilishes the specific position at which collocate the number. (Replacing indexArrayKernel)
         cudaMemcpy(CPUradixArray, radixArray, sizeof(int) * size, cudaMemcpyDeviceToHost);
         cudaMemcpy(bucket, bucketArray, sizeof(int) * RADIX, cudaMemcpyDeviceToHost);
         for (int c = 0; c < size; c++) {
@@ -362,7 +387,7 @@ void radixSort(int *array, int size) {
             offset = new_size_first * (j - 1);
 
             new_block_size = (my_size - 1) / BLOCKSIZE + 1;
-            // salva gli elementi nella corretta posizione ordinati.
+
             semiSortKernel<<<new_block_size, BLOCKSIZE, 0, stream[j]>>>(inputArray + offset, semiSortArray, indexArray + offset, my_size, significantDigit);
             mycudaerror = cudaGetLastError();
             if (mycudaerror != cudaSuccess) {
@@ -398,11 +423,15 @@ void radixSort(int *array, int size) {
 
     cudaFree(inputArray);
     cudaFree(indexArray);
+    cudaFree(g_maxdata);
+    cudaFree(g_mindata);
     cudaFree(radixArray);
     cudaFree(bucketArray);
     cudaFree(blockBucketArray);
     cudaFree(outputArray);
     cudaFree(semiSortArray);
+
+    cudaUnbindTexture(texture_semiSortArray);
 }
 
 int main() {

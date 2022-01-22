@@ -39,7 +39,10 @@
 #define GRIDSIZE ((SIZE - 1) / BLOCKSIZE + 1)
 #define RADIX 10
 #define FILE_TO_OPEN "Shared_measures.csv"
-
+/**
+ *  This kernel will be launched on GRIDSIZE * BLOCKSIZE threads, in order to copy the values of the semiSortArray in inArray
+ *
+ * **/
 __global__ void copyKernel(int *inArray, int *semiSortArray, int arrayLength) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -47,6 +50,10 @@ __global__ void copyKernel(int *inArray, int *semiSortArray, int arrayLength) {
         inArray[index] = semiSortArray[index];
     }
 }
+/**
+ * This kernel will be launched on GRIDSIZE * BLOCKSIZE threads, so that each thread will calculate its local maximum and minimum value
+ *
+ * */
 __global__ void reduceMaxMin(int *g_idata, int *g_maxdata, int *g_mindata) {
     __shared__ int smaxdata[(SIZE / GRIDSIZE)];  // each thread loads one element from global to shared mem unsigned
     __shared__ int smindata[(SIZE / GRIDSIZE)];  // each thread loads one element from global to shared mem unsigned
@@ -72,7 +79,10 @@ __global__ void reduceMaxMin(int *g_idata, int *g_maxdata, int *g_mindata) {
         g_mindata[blockIdx.x] = smindata[0];
     }
 }
-
+/**
+ * This kernel will be launched on 1 * BLOCKSIZE threads, so that a global
+ * maximum and minimum value shared between all blocks will be calcualted
+ * */
 __global__ void reduceMaxMin_Service(int *g_maxdata, int *g_mindata, int *max, int *min) {
     __shared__ int smaxdata[(BLOCKSIZE)];  // each thread loads one element from global to shared mem unsigned
     __shared__ int smindata[(BLOCKSIZE)];
@@ -103,7 +113,10 @@ __global__ void reduceMaxMin_Service(int *g_maxdata, int *g_mindata, int *max, i
         *min = smindata[0];
     }
 }
-
+/**
+ * This kernel will be launched on GRIDSIZE * BLOCKSIZE threads, so that each thread for
+ * the specific significant digit of the assigned value will increase the frequencies of the digit
+ * */
 __global__ void histogramKernel(int *inArray, int *outArray, int *radixArray, int arrayLength, int significantDigit, int minElement) {
     __shared__ int inArrayShared[BLOCKSIZE];
     __shared__ int outArrayShared[RADIX];
@@ -147,7 +160,11 @@ __global__ void histogramKernel(int *inArray, int *outArray, int *radixArray, in
         }
     }
 }
-
+/**
+ * This kernel will be launched on 1 * RADIX threads, so that the array containing the frequencies
+ * for each block is addictioned to that of the other blocks.
+ * Then the value in each position of the resulting array is addictioned with the value in the previus one position.
+ * */
 __global__ void combineBucket(int *blockBucketArray, int *bucketArray) {
     __shared__ int bucketArrayShared[RADIX];
 
@@ -168,7 +185,12 @@ __global__ void combineBucket(int *blockBucketArray, int *bucketArray) {
     __syncthreads();
     bucketArray[index] = bucketArrayShared[index];
 }
-
+/**
+ * This kernel will be launched on 1 * RADIX threads, so that each thread
+ * takes care of one digit between 0-9 and estabilishes the specific position
+ * at which collocate the number
+ *
+ * */
 __global__ void indexArrayKernel(int *radixArray, int *bucketArray, int *indexArray, int arrayLength, int significantDigit) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -186,7 +208,10 @@ __global__ void indexArrayKernel(int *radixArray, int *bucketArray, int *indexAr
         }
     }
 }
-
+/**
+ * This kernel will be launched on GRIDSIZE * BLOCKSIZE, so that a sorting
+ * for the specific significantDigit between the numbers is made
+ * */
 __global__ void semiSortKernel(int *inArray, int *outArray, int *indexArray, int arrayLength, int significantDigit) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -200,6 +225,9 @@ __global__ void semiSortKernel(int *inArray, int *outArray, int *indexArray, int
     }
 }
 
+/**
+ * Print all the array
+ * */
 void printArray(int *array, int size) {
     int i;
     printf("[ ");
@@ -207,17 +235,9 @@ void printArray(int *array, int size) {
         printf("%d ", array[i]);
     printf("]\n");
 }
-
-int findLargestNum(int *array, int size) {
-    int i;
-    int largestNum = -1;
-    for (i = 0; i < size; i++) {
-        if (array[i] > largestNum)
-            largestNum = array[i];
-    }
-    return largestNum;
-}
-
+/**
+ * This functions makes the csv file with all the information needed
+ * */
 void make_csv(float time, float N) {
     FILE *fp;
     if (access(FILE_TO_OPEN, F_OK) == 0) {
@@ -230,6 +250,10 @@ void make_csv(float time, float N) {
     fprintf(fp, "%f, %d, %d, %d, %f, %.5f\n", N, BLOCKSIZE, GRIDSIZE, MAX_DIGIT, GIPS / (time / 1000), time / 1000);
     fclose(fp);
 }
+
+/**
+ * This functions test if the array is correctly sorted.
+ * */
 void TESTArray(int *array, int size) {
     for (int i = 1; i < size; i++)
         if (array[i - 1] > array[i]) {
@@ -238,7 +262,10 @@ void TESTArray(int *array, int size) {
         }
     printf("Ordinamento Corretto");
 }
-
+/**
+ * This functions allocates all the resurces and launches all the kernel necessary
+ * to sort the array
+ * */
 void radixSort(int *array, int size) {
     int significantDigit = 1;
     cudaEvent_t start, stop;
@@ -303,11 +330,13 @@ void radixSort(int *array, int size) {
     cudaMemcpy(&max, largestNum, sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(&min, smallestNum, sizeof(int), cudaMemcpyDeviceToHost);
 
+    // We add minimum number of the array with the maximum one in order to support also the sorting of the negative numbers
     max_digit_value = max - min;
+    // We iterate on the number of digit contained in the max_digit_value
     while (max_digit_value / significantDigit > 0) {
         int bucket[RADIX] = {0};
         cudaMemcpy(bucketArray, bucket, sizeof(int) * RADIX, cudaMemcpyHostToDevice);
-        // calcolo frequenza per ogni cifra, questo nel mio blocco.
+
         histogramKernel<<<blockCount, threadCount>>>(inputArray, blockBucketArray, radixArray, size, significantDigit, min);
         cudaThreadSynchronize();
         mycudaerror = cudaGetLastError();
@@ -315,8 +344,7 @@ void radixSort(int *array, int size) {
             fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
             exit(1);
         }
-        // calcolo la frequenza per ogni cifra, sommando quelle di tutti i block.
-        // fondamentalmente sommo all'array delle frequenze il precedente, come facevamo nel vecchio algortimo. A[i-1] = A[i]
+
         combineBucket<<<1, RADIX>>>(blockBucketArray, bucketArray);
         cudaThreadSynchronize();
         mycudaerror = cudaGetLastError();
@@ -324,15 +352,15 @@ void radixSort(int *array, int size) {
             fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
             exit(1);
         }
-        // salva gli indici in cui memorizzare gli elementi ordinati --> fa la magia :D
-        indexArrayKernel<<<blockCount, threadCount>>>(radixArray, bucketArray, indexArray, size, significantDigit);
+
+        indexArrayKernel<<<1, RADIX>>>(radixArray, bucketArray, indexArray, size, significantDigit);
         cudaThreadSynchronize();
         mycudaerror = cudaGetLastError();
         if (mycudaerror != cudaSuccess) {
             fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
             exit(1);
         }
-        // salva gli elementi nella corretta posizione ordinati.
+
         semiSortKernel<<<blockCount, threadCount>>>(inputArray, semiSortArray, indexArray, size, significantDigit);
         cudaThreadSynchronize();
         mycudaerror = cudaGetLastError();
@@ -340,7 +368,7 @@ void radixSort(int *array, int size) {
             fprintf(stderr, "%s\n", cudaGetErrorString(mycudaerror));
             exit(1);
         }
-        // aggiorno inputArray con il semisortedarray
+
         copyKernel<<<blockCount, threadCount>>>(inputArray, semiSortArray, size);
         cudaThreadSynchronize();
         mycudaerror = cudaGetLastError();
@@ -366,6 +394,8 @@ void radixSort(int *array, int size) {
 
     cudaFree(inputArray);
     cudaFree(indexArray);
+    cudaFree(g_maxdata);
+    cudaFree(g_mindata);
     cudaFree(radixArray);
     cudaFree(bucketArray);
     cudaFree(blockBucketArray);

@@ -35,7 +35,7 @@
 #define GRIDSIZE ((SIZE - 1) / BLOCKSIZE + 1)
 #define RADIX 10
 #define MAXSM 12
-#define FILE_TO_OPEN "new_STEAMS_Shared_measure.csv"
+#define FILE_TO_OPEN "Streams_Shared_measure.csv"
 
 __global__ void copyKernel(int *inArray, int *semiSortArray, int arrayLength) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;

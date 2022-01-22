@@ -424,9 +424,10 @@ int main() {
 
     radixSort(array, size);
     for (int i = 1; i < size; i++)
-        if (array[i - 1] > array[i])
+        if (array[i - 1] > array[i]) {
             printf("SE SCASSATT O PUNTATOR");
-
+            break;
+        }
     // printf("\nSorted List:");
     // printArray(array, size);
 

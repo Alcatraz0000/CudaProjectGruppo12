@@ -32,6 +32,10 @@
 #define GIPS 0
 #endif
 
+#ifndef test
+#define test 0
+#endif
+
 #define GRIDSIZE ((SIZE - 1) / BLOCKSIZE + 1)
 #define RADIX 10
 #define MAXSM 12
@@ -199,6 +203,15 @@ void make_csv(float time, float N) {
     }
     fprintf(fp, "%f, %d, %d, %d, %f, %.5f\n", N, BLOCKSIZE, GRIDSIZE, MAX_DIGIT, GIPS / (time / 1000), time / 1000);
     fclose(fp);
+}
+
+void testArray(int *array) {
+    for (int i = 1; i < size; i++)
+        if (array[i - 1] > array[i]) {
+            printf("\nERRORE NELL'ORDINAMENTO!\n");
+            break;
+        }
+    printf("Ordinamento Corretto");
 }
 
 __global__ void resetBucket(int *bucket) {
@@ -423,11 +436,10 @@ int main() {
     // printArray(array, size);
 
     radixSort(array, size);
-    for (int i = 1; i < size; i++)
-        if (array[i - 1] > array[i]) {
-            printf("SE SCASSATT O PUNTATOR");
-            break;
-        }
+
+    if (test) {
+        testArray(array);
+    }
     // printf("\nSorted List:");
     // printArray(array, size);
 

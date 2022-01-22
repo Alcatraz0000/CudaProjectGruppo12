@@ -369,7 +369,7 @@ void radixSort(int *array, int size) {
     float transferTime;
     cudaEventElapsedTime(&transferTime, start, stop);
     printf("CUDA Time = %.5f ms GIPS = %.5f MAX_DIGIT = %d BLOCKSIZE = %d dim=%d\n", transferTime, GIPS, MAX_DIGIT, BLOCKSIZE, size);
-    make_csv(0, transferTime, size);
+    make_csv(transferTime, size);
     cudaMemcpy(array, inputArray, sizeof(int) * size, cudaMemcpyDeviceToHost);
 
     cudaFree(inputArray);

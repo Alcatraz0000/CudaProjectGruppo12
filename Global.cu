@@ -403,7 +403,7 @@ int main() {
     radixSort(array, size);
 
     if (TEST) {
-        TESTArray(array);
+        TESTArray(array, size);
     }
 
     // printf("\nSorted List:");

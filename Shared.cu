@@ -32,6 +32,10 @@
 #define GIPS 0
 #endif
 
+#ifndef TEST
+#define TEST 0
+#endif
+
 #define GRIDSIZE ((SIZE - 1) / BLOCKSIZE + 1)
 #define RADIX 10
 #define FILE_TO_OPEN "Shared_measures.csv"
@@ -391,7 +395,7 @@ int main() {
     radixSort(array, size);
 
     if (TEST) {
-        TESTArray(array);
+        TESTArray(array, size);
     }
     // printf("\nSorted List:");
     // printArray(array, size);

@@ -32,8 +32,8 @@
 #define GIPS 0
 #endif
 
-#ifndef test
-#define test 0
+#ifndef TEST
+#define TEST 0
 #endif
 
 #define GRIDSIZE ((SIZE - 1) / BLOCKSIZE + 1)
@@ -205,7 +205,7 @@ void make_csv(float time, float N) {
     fclose(fp);
 }
 
-void testArray(int *array) {
+void TESTArray(int *array) {
     for (int i = 1; i < size; i++)
         if (array[i - 1] > array[i]) {
             printf("\nERRORE NELL'ORDINAMENTO!\n");
@@ -437,8 +437,8 @@ int main() {
 
     radixSort(array, size);
 
-    if (test) {
-        testArray(array);
+    if (TEST) {
+        TESTArray(array);
     }
     // printf("\nSorted List:");
     // printArray(array, size);

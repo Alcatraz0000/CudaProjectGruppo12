@@ -226,7 +226,7 @@ void make_csv(float time, float N) {
     fprintf(fp, "%f, %d, %d, %d, %f, %.5f\n", N, BLOCKSIZE, GRIDSIZE, MAX_DIGIT, GIPS / (time / 1000), time / 1000);
     fclose(fp);
 }
-void testArray(int *array) {
+void TESTArray(int *array) {
     for (int i = 1; i < size; i++)
         if (array[i - 1] > array[i]) {
             printf("\nERRORE NELL'ORDINAMENTO!\n");
@@ -390,8 +390,8 @@ int main() {
 
     radixSort(array, size);
 
-    if (test) {
-        testArray(array);
+    if (TEST) {
+        TESTArray(array);
     }
     // printf("\nSorted List:");
     // printArray(array, size);
